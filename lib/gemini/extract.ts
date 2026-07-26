@@ -57,7 +57,7 @@ Extract restaurant information and return JSON in exactly this format:
       systemInstruction: EXTRACTION_PROMPT,
       userMessage,
       temperature: 0.1,
-      maxOutputTokens: 800,
+      maxOutputTokens: 32768,
     });
 
     // Normalize into the ExtractionResult shape with safe defaults.

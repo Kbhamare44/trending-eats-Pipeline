@@ -136,7 +136,7 @@ Don't use marketing language. Write like a trusted friend giving advice.`;
     model: MODELS.summarize,
     prompt,
     temperature: 0.7,
-    maxOutputTokens: 200,
+    maxOutputTokens: 8192,
   });
 }
 
