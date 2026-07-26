@@ -5,12 +5,11 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 // One client for the whole pipeline.
-// Never expose this to the browser — it uses your secret API key.
 export const gemini = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-// All model IDs in one place. If Google renames a model, change it here only.
+// All model IDs in one place.
 export const MODELS = {
   classify: 'gemini-flash-latest',
   extract: 'gemini-flash-latest',
@@ -18,8 +17,10 @@ export const MODELS = {
 } as const;
 
 // Shared helper: send a prompt, force JSON out, return it parsed.
-// Gemini's equivalent of OpenAI's response_format: { type: 'json_object' }
-// is config.responseMimeType: 'application/json'.
+// NOTE: gemini-flash-latest is a "thinking" model with thinking ON by default.
+// Thinking tokens count against maxOutputTokens, so we set a HIGH ceiling
+// (8192) to leave room for both the reasoning and the JSON answer. We do NOT
+// set thinkingBudget:0 — 3.x flash models reject it with 400 INVALID_ARGUMENT.
 export async function generateJSON<T>(opts: {
   model: string;
   systemInstruction: string;
@@ -33,33 +34,30 @@ export async function generateJSON<T>(opts: {
     config: {
       systemInstruction: opts.systemInstruction,
       temperature: opts.temperature ?? 0.1,
-      maxOutputTokens: opts.maxOutputTokens ?? 4000,
+      maxOutputTokens: opts.maxOutputTokens ?? 8192,
       responseMimeType: 'application/json',
-      thinkingConfig: {
-        thinkingBudget: 0,
-      },
     },
   });
 
-  // In @google/genai, response.text is a getter (not a function like the old SDK).
-// In @google/genai, response.text is a getter (not a function like the old SDK).
-const text = response.text;
+  const text = response.text;
   if (!text) throw new Error('Empty response from Gemini');
 
-  // Gemini sometimes wraps JSON in ```json ... ``` fences or adds stray text.
-  // Strip fences and extract the JSON object before parsing.
+  // Strip markdown fences and extract the first {...} block before parsing.
   let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+  cleaned = cleaned
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/, '')
+    .replace(/```$/, '')
+    .trim();
 
-  // Fallback: grab the first {...} block if there's still surrounding text
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (match) cleaned = match[0];
 
   try {
     return JSON.parse(cleaned) as T;
   } catch (e) {
-    throw new Error(`Failed to parse Gemini JSON. Raw response: ${text.slice(0, 200)}`);
-  };
+    throw new Error(`Bad JSON (len ${text.length}): ${text.slice(0, 300)}`);
+  }
 }
 
 // Shared helper for plain-text generation (used by the aggregator's summary).
@@ -74,7 +72,7 @@ export async function generateText(opts: {
     contents: opts.prompt,
     config: {
       temperature: opts.temperature ?? 0.7,
-      maxOutputTokens: opts.maxOutputTokens ?? 200,
+      maxOutputTokens: opts.maxOutputTokens ?? 2048,
     },
   });
   return response.text ?? '';
