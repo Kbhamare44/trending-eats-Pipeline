@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
           created_at
         )
       `)
-      .gt('review_count', 0)
+      
       .limit(limit);
 
     if (city) {

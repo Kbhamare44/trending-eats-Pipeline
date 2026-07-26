@@ -45,7 +45,7 @@ Classify this content and return JSON in exactly this format:
       systemInstruction: CLASSIFICATION_PROMPT,
       userMessage,
       temperature: 0,   // deterministic classification
-      maxOutputTokens: 200,
+      maxOutputTokens: 32768,
     });
 
     // Validate the response has the required field
