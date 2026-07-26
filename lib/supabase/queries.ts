@@ -141,7 +141,7 @@ export async function createReview(
       thumbnail_url: tiktokData.thumbnailUrl,
       likes: tiktokData.likes,
       views: tiktokData.views,
-      dishes_mentioned: extraction.dishesmmentioned,
+      dishes_mentioned: extraction.dishesMentioned,
       sentiment: extraction.sentiment,
       sentiment_score: extraction.sentimentScore,
       pros: extraction.pros,
