@@ -13,21 +13,7 @@ export async function GET(request: NextRequest) {
   try {
     let query = supabase
       .from('restaurants')
-      .select(`
-        *,
-        reviews (
-          id,
-          tiktok_url,
-          thumbnail_url,
-          sentiment,
-          sentiment_score,
-          dishes_mentioned,
-          reviewer_summary,
-          is_sponsored,
-          created_at
-        )
-      `)
-      
+      .select('*')
       .limit(limit);
 
     if (city) {
