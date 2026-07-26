@@ -39,10 +39,24 @@ export async function generateJSON<T>(opts: {
   });
 
   // In @google/genai, response.text is a getter (not a function like the old SDK).
-  const text = response.text;
+// In @google/genai, response.text is a getter (not a function like the old SDK).
+const text = response.text;
   if (!text) throw new Error('Empty response from Gemini');
 
-  return JSON.parse(text) as T;
+  // Gemini sometimes wraps JSON in ```json ... ``` fences or adds stray text.
+  // Strip fences and extract the JSON object before parsing.
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+
+  // Fallback: grab the first {...} block if there's still surrounding text
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) cleaned = match[0];
+
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (e) {
+    throw new Error(`Failed to parse Gemini JSON. Raw response: ${text.slice(0, 200)}`);
+  };
 }
 
 // Shared helper for plain-text generation (used by the aggregator's summary).
