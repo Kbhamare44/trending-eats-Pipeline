@@ -12,9 +12,9 @@ export const gemini = new GoogleGenAI({
 
 // All model IDs in one place. If Google renames a model, change it here only.
 export const MODELS = {
-  classify: 'gemini-3.1-flash-lite', // cheap, high-volume, free tier
-  extract: 'gemini-3-flash',         // more reasoning for sponsorship detection
-  summarize: 'gemini-3.1-flash-lite',
+  classify: 'gemini-2.5-flash',
+  extract: 'gemini-2.5-flash',
+  summarize: 'gemini-2.5-flash',
 } as const;
 
 // Shared helper: send a prompt, force JSON out, return it parsed.
