@@ -17,6 +17,7 @@ Important rules:
 - Food hauls from grocery stores are NOT restaurant reviews
 - Home cooking content is NOT a restaurant review
 - Even if food looks amazing, if it's homemade it's not a restaurant review
+- Captions may include long rating scales, scoring rubrics, or hashtags. Ignore these and focus on whether a specific restaurant/food establishment is being visited or reviewed.
 
 Return ONLY valid JSON with no markdown, no explanation, just the JSON object.`;
 

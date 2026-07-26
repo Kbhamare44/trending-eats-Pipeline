@@ -48,7 +48,7 @@ export async function processSubmission(
       tiktokData.creatorUsername
     );
 
-    if (!classification.isRestaurantReview || classification.confidence < 0.6) {
+    if (!classification.isRestaurantReview || classification.confidence < 0.4) {
       await updateSubmissionStatus(submissionId, 'rejected', {
         rejectionReason: `Not a restaurant review (${classification.contentType}, confidence: ${classification.confidence})`,
       });
