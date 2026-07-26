@@ -54,7 +54,7 @@ export async function processSubmission(
       });
       return {
         success: false,
-        rejectionReason: `Not a restaurant review: ${classification.contentType}`,
+        rejectionReason: `Not a restaurant review: ${classification.contentType} — ${classification.reasoning}`,
       };
     }
 

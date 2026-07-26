@@ -18,6 +18,9 @@ Important rules:
 - Home cooking content is NOT a restaurant review
 - Even if food looks amazing, if it's homemade it's not a restaurant review
 - Captions may include long rating scales, scoring rubrics, or hashtags. Ignore these and focus on whether a specific restaurant/food establishment is being visited or reviewed.
+- Many food reviewers include a long rating scale or scoring rubric in the caption (e.g. "9/10: loved it, 8/10: solid"). This rubric is NOT the content — ignore it completely.
+- If the caption names a specific restaurant and mentions eating or visiting there, it IS a restaurant_review, even if most of the caption is a rating scale or hashtags.
+
 
 Return ONLY valid JSON with no markdown, no explanation, just the JSON object.`;
 
