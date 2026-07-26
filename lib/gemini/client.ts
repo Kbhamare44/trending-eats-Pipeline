@@ -33,7 +33,7 @@ export async function generateJSON<T>(opts: {
     config: {
       systemInstruction: opts.systemInstruction,
       temperature: opts.temperature ?? 0.1,
-      maxOutputTokens: opts.maxOutputTokens ?? 800,
+      maxOutputTokens: opts.maxOutputTokens ?? 4000,
       responseMimeType: 'application/json',
     },
   });
