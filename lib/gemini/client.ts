@@ -35,6 +35,9 @@ export async function generateJSON<T>(opts: {
       temperature: opts.temperature ?? 0.1,
       maxOutputTokens: opts.maxOutputTokens ?? 4000,
       responseMimeType: 'application/json',
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
     },
   });
 
