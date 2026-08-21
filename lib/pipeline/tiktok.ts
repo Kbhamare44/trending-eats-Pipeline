@@ -2,19 +2,17 @@ import axios from 'axios';
 import { TikTokData } from '@/lib/types';
 
 // Extract the video ID from any TikTok URL format
-// Handles: tiktok.com/@user/video/123, vm.tiktok.com/abc, etc.
 function extractVideoId(url: string): string | null {
   const patterns = [
     /tiktok\.com\/@[\w.]+\/video\/(\d+)/,
     /tiktok\.com\/v\/(\d+)/,
     /vm\.tiktok\.com\/(\w+)/,
+    /vt\.tiktok\.com\/(\w+)/,
   ];
-
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) return match[1];
   }
-
   return null;
 }
 
@@ -28,22 +26,46 @@ function isValidTikTokUrl(url: string): boolean {
   }
 }
 
+// Short links (vt.tiktok.com / vm.tiktok.com) must be expanded to the full
+// tiktok.com/@user/video/... URL before oEmbed will accept them.
+// This follows the redirect without downloading the page.
+async function expandShortUrl(url: string): Promise<string> {
+  const isShort =
+    url.includes('vt.tiktok.com') || url.includes('vm.tiktok.com');
+  if (!isShort) return url;
+
+  try {
+    const response = await axios.get(url, {
+      maxRedirects: 5,
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      // We only care about the final URL, not the body
+      validateStatus: () => true,
+    });
+    // axios exposes the final resolved URL here
+    const finalUrl = response.request?.res?.responseUrl || url;
+    return finalUrl;
+  } catch {
+    // If expansion fails, fall back to the original and let oEmbed try
+    return url;
+  }
+}
+
 // Fetch metadata from TikTok's official oEmbed endpoint
-// This is the only sanctioned way to get TikTok video data
 export async function fetchTikTokData(url: string): Promise<TikTokData> {
   if (!isValidTikTokUrl(url)) {
     throw new Error('Invalid TikTok URL');
   }
 
-  const oEmbedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
+  // Expand short share links first
+  const fullUrl = await expandShortUrl(url);
 
+  const oEmbedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(fullUrl)}`;
   let response;
   try {
     response = await axios.get(oEmbedUrl, {
       timeout: 10000,
-      headers: {
-        'User-Agent': 'TrendingEatsApp/1.0',
-      },
+      headers: { 'User-Agent': 'TrendingEatsApp/1.0' },
     });
   } catch (error: any) {
     if (error.response?.status === 404) {
@@ -56,20 +78,16 @@ export async function fetchTikTokData(url: string): Promise<TikTokData> {
   }
 
   const data = response.data;
-
-  // oEmbed gives us: title (caption), author_name, thumbnail_url, html (embed)
-  // Likes and views are NOT available via oEmbed — we default to 0
-  // If you later get Research API access, you can populate these
-  const videoId = extractVideoId(url) || data.video_id || '';
+  const videoId = extractVideoId(fullUrl) || data.video_id || '';
 
   return {
     videoId,
-    url,
+    url: fullUrl,
     caption: data.title || '',
     creatorUsername: data.author_name || '',
     thumbnailUrl: data.thumbnail_url || '',
     embedHtml: data.html || '',
-    likes: 0,    // Not available via oEmbed
-    views: 0,    // Not available via oEmbed
+    likes: 0,
+    views: 0,
   };
 }
