@@ -58,7 +58,13 @@ export async function fetchTikTokData(url: string): Promise<TikTokData> {
   }
 
   // Expand short share links first
+    // Expand short share links first
   const fullUrl = await expandShortUrl(url);
+
+  // TikTok photo/slideshow posts aren't supported by oEmbed (videos only)
+  if (fullUrl.includes('/photo/')) {
+    throw new Error('TikTok photo posts aren\'t supported — please submit a video review instead');
+  }
 
   const oEmbedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(fullUrl)}`;
   let response;
