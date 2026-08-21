@@ -20,7 +20,6 @@ export async function findRestaurant(
     const searchResponse = await axios.get(`${PLACES_BASE}/textsearch/json`, {
       params: {
         query,
-        type: 'restaurant',
         key: process.env.GOOGLE_PLACES_API_KEY,
       },
       timeout: 8000,
