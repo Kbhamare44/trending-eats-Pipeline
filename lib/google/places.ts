@@ -13,7 +13,7 @@ export async function findRestaurant(
     throw new Error('GOOGLE_PLACES_API_KEY is required');
   }
 
-  const query = `${name} restaurant ${city}`;
+  const query = `${name} ${city}`;
 
   try {
     // Step 1: Text search to find the restaurant
