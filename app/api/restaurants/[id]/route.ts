@@ -11,7 +11,7 @@ export async function GET(
     .from('restaurants')
     .select(`
       *,
-      reviews (
+      reviews!reviews_restaurant_id_fkey (
         id,
         tiktok_url,
         embed_html,
