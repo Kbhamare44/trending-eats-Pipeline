@@ -9,7 +9,19 @@ export async function GET(
 
   const { data, error } = await supabase
     .from('restaurants')
-    .select(`*, reviews (*)`)
+    .select(`
+      *,
+      reviews (
+        id,
+        tiktok_url,
+        sentiment,
+        sentiment_score,
+        dishes_mentioned,
+        reviewer_summary,
+        is_sponsored,
+        created_at
+      )
+    `)
     .eq('id', id)
     .single();
 
