@@ -139,6 +139,7 @@ export async function createReview(
       tiktok_video_id: tiktokData.videoId,
       creator_username: tiktokData.creatorUsername,
       thumbnail_url: tiktokData.thumbnailUrl,
+      embed_html: tiktokData.embedHtml,
       likes: tiktokData.likes,
       views: tiktokData.views,
       dishes_mentioned: extraction.dishesMentioned,
