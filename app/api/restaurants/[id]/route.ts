@@ -14,7 +14,7 @@ export async function GET(
       reviews (
         id,
         tiktok_url,
-        embed_html,
+        thumbnail_url,
         sentiment,
         sentiment_score,
         dishes_mentioned,
