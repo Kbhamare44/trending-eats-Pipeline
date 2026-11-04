@@ -72,7 +72,56 @@ function readLinks(file: string): string[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Confirm this run will be treated as an operator before spending an evening
+ * on it.
+ *
+ * Without a secret that matches the SERVER's CRON_SECRET, submissions count
+ * as anonymous and share one global budget of LIMIT_SUBMIT_ANON_HOUR per
+ * hour. A 40-link run would then succeed for the first few and 429 for the
+ * rest — an hour into a seeding session, with no obvious cause. The local
+ * PIPELINE_SECRET does not necessarily match production; checking is cheap.
+ */
+async function checkOperatorAccess(baseUrl: string): Promise<boolean> {
+  if (!OPERATOR_SECRET) {
+    console.warn(
+      '\n!! No CRON_SECRET or PIPELINE_SECRET in the environment.\n' +
+        '   Submissions will be anonymous and rate limited to a shared\n' +
+        '   budget per hour. Set CRON_SECRET to the SAME value as Vercel\n' +
+        '   before seeding more than a handful of links.\n'
+    );
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/cron/recompute`, {
+      headers: { Authorization: `Bearer ${OPERATOR_SECRET}` },
+    });
+    if (response.status === 401) {
+      console.warn(
+        '\n!! The secret in your environment is REJECTED by ' + baseUrl + '.\n' +
+          '   It does not match the server\'s CRON_SECRET, so this run will be\n' +
+          '   treated as anonymous and will start returning 429 after the\n' +
+          '   shared hourly budget is used.\n' +
+          '   Copy CRON_SECRET from Vercel into .env.local and re-run.\n'
+      );
+      return false;
+    }
+    if (!response.ok) {
+      console.warn(`   (operator check got ${response.status}; continuing)`);
+      return true;
+    }
+    console.log('Operator access confirmed — rate limits bypassed.\n');
+    return true;
+  } catch (err: any) {
+    console.warn(`   (operator check failed: ${err.message}; continuing)`);
+    return true;
+  }
+}
+
 async function main() {
+  // See checkOperatorAccess: a silent fall back to anonymous limits is
+  // the difference between seeding 40 links and seeding 10.
   const { file, baseUrl, dryRun } = parseArgs();
 
   if (!file) {
@@ -91,6 +140,9 @@ async function main() {
     console.log('\nDry run — nothing submitted.');
     return;
   }
+
+  // Checked before the first submission, not after the tenth 429.
+  await checkOperatorAccess(baseUrl);
 
   const outcomes: Outcome[] = [];
 
