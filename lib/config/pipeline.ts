@@ -34,6 +34,17 @@ export const QUEUE_CONFIG = {
    * permanently broken URL consume quota on every single cron run.
    */
   maxAttempts: num('QUEUE_MAX_ATTEMPTS', 3),
+
+  /**
+   * Concurrent background drains allowed per process.
+   *
+   * 2, not 5. Each drain makes one Supadata call, two Gemini calls and up to
+   * two Places calls, and the free/low tiers of those providers are the
+   * binding constraint — not our CPU. Submissions beyond the gate stay
+   * `pending` and the cron drains them serially, so a burst is flattened
+   * rather than dropped.
+   */
+  maxConcurrentDrains: num('QUEUE_MAX_CONCURRENT_DRAINS', 2),
 } as const;
 
 if (QUEUE_CONFIG.maxAttempts < 1) {

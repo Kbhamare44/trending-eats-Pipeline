@@ -34,10 +34,34 @@
  */
 
 import { claimSubmission, releaseSubmission, getSubmissionById } from '@/lib/supabase/queries';
+import { QUEUE_CONFIG } from '@/lib/config/pipeline';
 import { processSubmission, type ProcessingResult } from './processor';
 import { aggregateRestaurantReviews } from './aggregator';
 import { syncRestaurantDishes } from '@/lib/dishes/aggregate';
 import { recomputeRestaurantTrends } from '@/lib/trends/recompute';
+
+/**
+ * Concurrent drains allowed in this process.
+ *
+ * WHY THIS IS NEEDED, and it is a regression the async rewrite introduced:
+ * before it, /api/submit ran the pipeline inside the request, so a seeding
+ * script that waits 3 seconds between links genuinely serialised — each
+ * submission blocked for the 15-30 seconds the pipeline took. Now submit
+ * returns in under a second and the work happens in `after()`, so the same
+ * script starts a new pipeline every 3 seconds while roughly seven are still
+ * running. Each one costs a Supadata credit, two Gemini calls and two Places
+ * calls, so a 40-link seeding run would hammer every provider at once and
+ * convert a batch of good submissions into rate-limited retries.
+ *
+ * When the gate is full, drainSubmission returns WITHOUT claiming the row.
+ * That is the important part: the row stays `pending`, so the cron picks it
+ * up and processes it serially. Nothing is lost, the burst just flattens.
+ *
+ * Per-process, so it does not bound total concurrency across instances — but
+ * Vercel reuses a warm instance for a burst from one client, which is exactly
+ * the seeding case.
+ */
+let activeDrains = 0;
 
 export interface DrainOutcome {
   submissionId: string;
@@ -58,8 +82,23 @@ export interface DrainOutcome {
  * Never throws — callers are background tasks and cron batches where one bad
  * submission must not take down the rest.
  */
-export async function drainSubmission(submissionId: string): Promise<DrainOutcome> {
+export async function drainSubmission(
+  submissionId: string,
+  options: { bypassGate?: boolean } = {}
+): Promise<DrainOutcome> {
   let attempts = 0;
+
+  // The cron drains serially on purpose and is the mechanism that catches up
+  // after a burst, so it must not be turned away by the gate.
+  const gated = !options.bypassGate;
+
+  if (gated && activeDrains >= QUEUE_CONFIG.maxConcurrentDrains) {
+    console.log(
+      `[Worker] ${submissionId} left pending: ${activeDrains} drain(s) already running`
+    );
+    return { submissionId, claimed: false, status: 'skipped' };
+  }
+  if (gated) activeDrains++;
 
   try {
     const record = await getSubmissionById(submissionId);
@@ -140,5 +179,12 @@ export async function drainSubmission(submissionId: string): Promise<DrainOutcom
       `[Worker] ${submissionId} attempt ${attempts} failed (${disposition}): ${message}`
     );
     return { submissionId, claimed: true, status: disposition, error: message };
+  } finally {
+    if (gated) activeDrains--;
   }
+}
+
+/** Drains currently running in this process. For tests and logging. */
+export function activeDrainCount(): number {
+  return activeDrains;
 }

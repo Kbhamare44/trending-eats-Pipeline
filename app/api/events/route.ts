@@ -15,6 +15,7 @@ import type { NextRequest } from 'next/server';
 import { getAuthedUser } from '@/lib/auth/verify';
 import { recordEvent, isClientEventType } from '@/lib/trends/events';
 import { ok, badRequest, serverError } from '@/lib/http/respond';
+import { inMemoryLimit, clientKey, LIMITS, tooManyRequests } from '@/lib/http/ratelimit';
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,6 +36,19 @@ export async function POST(request: NextRequest) {
     }
 
     const user = await getAuthedUser(request);
+
+    // An event is one cheap insert, but unbounded inserts still fill the
+    // table that every trend score reads. In-memory and therefore best
+    // effort — see lib/http/ratelimit.ts — which is the right trade for
+    // analytics: never worth a round trip to enforce precisely.
+    const limit = inMemoryLimit(
+      `events:${clientKey(request, user?.id)}`,
+      LIMITS.eventsPerMinute,
+      60_000
+    );
+    if (!limit.allowed) {
+      return tooManyRequests('Slow down.', limit.retryAfterSeconds);
+    }
 
     await recordEvent({
       eventType,

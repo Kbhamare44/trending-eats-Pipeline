@@ -75,6 +75,20 @@ export async function getPendingSubmissions(
 
 // ── Restaurants ──────────────────────────────────────────
 
+/**
+ * Find a restaurant by its Google place id.
+ *
+ * Ordered + limit(1) + maybeSingle rather than single(). `single()` raises
+ * not only when there are no rows (PGRST116, which was handled) but also when
+ * there is MORE than one — and that case was not handled, so a single
+ * duplicate row would make every future submission for that restaurant throw,
+ * permanently, with an error that reads like a database fault rather than a
+ * data problem.
+ *
+ * Ordering by created_at makes the choice deterministic: if duplicates do
+ * exist, every caller converges on the same oldest row instead of attaching
+ * reviews to whichever one the planner happened to return.
+ */
 export async function findRestaurantByPlaceId(
   placeId: string
 ): Promise<any | null> {
@@ -82,15 +96,38 @@ export async function findRestaurantByPlaceId(
     .from('restaurants')
     .select('*')
     .eq('google_place_id', placeId)
-    .single();
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') {
+  if (error) {
     throw new Error(`Failed to find restaurant: ${error.message}`);
   }
 
   return data || null;
 }
 
+/**
+ * Create a restaurant, tolerating a concurrent create of the same one.
+ *
+ * THE RACE: processSubmission looks the restaurant up by google_place_id and
+ * inserts if absent. Two submissions for the same restaurant processed at the
+ * same time — which is exactly what a seeding run with several videos of one
+ * viral bakery produces — both miss the lookup and both insert.
+ *
+ * What happens next depends on a constraint this repo does not define (the
+ * base schema was created elsewhere). If google_place_id is unique, one
+ * insert fails and, before this change, took the whole submission down with
+ * it: the worker would mark it for retry, and the retry would re-run the
+ * Gemini and Places calls that had already succeeded. If it is NOT unique,
+ * the far worse outcome — two restaurant rows for one business, splitting its
+ * reviews, its trend score and its map pin, and breaking
+ * findRestaurantByPlaceId, which uses .single().
+ *
+ * So this re-reads by place id on any insert failure and uses whatever is
+ * there. Correct under either constraint, and it costs one extra query only
+ * on the rare collision.
+ */
 export async function createRestaurant(
   place: PlaceResult,
   extraction: ExtractionResult
@@ -116,7 +153,16 @@ export async function createRestaurant(
     .select('id')
     .single();
 
-  if (error) throw new Error(`Failed to create restaurant: ${error.message}`);
+  if (error) {
+    const existing = await findRestaurantByPlaceId(place.placeId);
+    if (existing?.id) {
+      console.log(
+        `[Queries] lost a create race for ${place.name}; using the existing row`
+      );
+      return existing.id;
+    }
+    throw new Error(`Failed to create restaurant: ${error.message}`);
+  }
   return data.id;
 }
 
@@ -455,4 +501,41 @@ export async function requeueStuckSubmissions(): Promise<{
   }
 
   return { requeued: toRequeue.length, failed: toFail.length };
+}
+
+/**
+ * How many submissions a caller has made in the last hour.
+ *
+ * Counted against `raw_submissions` because that table already records every
+ * submission with a timestamp — no new table, and the count is durable across
+ * cold starts, which an in-memory limiter is not. Spend is proportional to
+ * rows here, so this bounds spend directly.
+ *
+ * Pass null for anonymous, which counts ALL anonymous submissions in the
+ * window as one shared budget: anonymous callers cannot be told apart, and
+ * giving each one its own allowance would be no limit at all.
+ */
+export async function countRecentSubmissions(
+  userId: string | null,
+  windowMs: number
+): Promise<number> {
+  const since = new Date(Date.now() - windowMs).toISOString();
+
+  let query = supabase
+    .from('raw_submissions')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', since);
+
+  query = userId ? query.eq('submitted_by', userId) : query.is('submitted_by', null);
+
+  const { count, error } = await query;
+
+  if (error) {
+    // Fail OPEN, deliberately. A broken count must not stop real people
+    // submitting; the queue's own attempt limits and the provider quotas are
+    // the backstop. Logged loudly so it does not pass unnoticed.
+    console.error('[RateLimit] submission count failed, allowing:', error.message);
+    return 0;
+  }
+  return count ?? 0;
 }

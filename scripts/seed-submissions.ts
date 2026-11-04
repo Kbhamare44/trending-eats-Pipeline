@@ -31,6 +31,12 @@ const DEFAULT_URL = 'http://localhost:3000';
 /** Be polite to the endpoint, and to Gemini/Places quotas. */
 const DELAY_MS = 3000;
 
+/**
+ * Exempts this run from the anonymous submission rate limit. Either name
+ * works; CRON_SECRET is what Vercel Cron sends and what the server prefers.
+ */
+const OPERATOR_SECRET = process.env.CRON_SECRET || process.env.PIPELINE_SECRET || '';
+
 interface Outcome {
   url: string;
   status: 'accepted' | 'rejected' | 'error';
@@ -95,7 +101,14 @@ async function main() {
     try {
       const response = await fetch(`${baseUrl}/api/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Present the operator secret so seeding is exempt from the
+        // anonymous submission rate limit. Without it a 25-40 link run stops
+        // at LIMIT_SUBMIT_ANON_HOUR, because these submissions have no user
+        // to attribute them to.
+        headers: {
+          'Content-Type': 'application/json',
+          ...(OPERATOR_SECRET ? { Authorization: `Bearer ${OPERATOR_SECRET}` } : {}),
+        },
         body: JSON.stringify({ tiktokUrl: url }),
       });
 

@@ -25,10 +25,12 @@ import {
   createRawSubmission,
   findReviewByVideoId,
   findOpenSubmissionByUrl,
+  countRecentSubmissions,
 } from '@/lib/supabase/queries';
+import { LIMITS, tooManyRequests } from '@/lib/http/ratelimit';
 import { extractVideoId, isSubmittableTikTokUrl } from '@/lib/pipeline/tiktok';
 import { drainSubmission } from '@/lib/pipeline/worker';
-import { getAuthedUser } from '@/lib/auth/verify';
+import { getAuthedUser, isAuthorizedCron } from '@/lib/auth/verify';
 import { ok, badRequest, serverError } from '@/lib/http/respond';
 
 /**
@@ -96,6 +98,36 @@ export async function POST(request: NextRequest) {
     // creator and trend stats. Anonymous submissions are allowed, with a null
     // submitter.
     const user = await getAuthedUser(request);
+
+    // ── Rate limit ─────────────────────────────────────
+    // Checked AFTER the dedupe lookups above, so re-pasting a link we already
+    // have never counts against anyone's budget, and BEFORE anything is
+    // written or any provider is called.
+    //
+    // Counted in the database rather than in memory: this is the endpoint
+    // that spends money, so the limit has to survive a cold start.
+    // An operator call — the seeding script — presents CRON_SECRET and is
+    // exempt. Without this, seeding 25-40 links would stop at the anonymous
+    // cap, because the seed script has no user to attribute submissions to.
+    const isOperator = isAuthorizedCron(request);
+
+    const HOUR = 60 * 60 * 1000;
+    const limit = user
+      ? LIMITS.submitPerUserPerHour
+      : LIMITS.submitAnonymousPerHour;
+    const recent = isOperator
+      ? 0
+      : await countRecentSubmissions(user?.id ?? null, HOUR);
+
+    if (!isOperator && recent >= limit) {
+      return tooManyRequests(
+        user
+          ? "That's a lot of links in one hour. Try again a bit later."
+          : 'Too many anonymous submissions right now. Sign in to keep adding links.',
+        3600
+      );
+    }
+
     const submissionId = await createRawSubmission(url, user?.id ?? null);
 
     // Fast path: start draining as soon as the response is on the wire. If

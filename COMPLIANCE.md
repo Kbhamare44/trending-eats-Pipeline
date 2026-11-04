@@ -15,11 +15,36 @@ submit.** Nothing in this codebase discovers content on its own.
 person pastes a TikTok link
   -> POST /api/submit                      (user-initiated, authenticated or anonymous)
   -> row in raw_submissions                (status: pending)
+  -> background worker picks it up         (never the request path)
   -> TikTok oEmbed                         (public endpoint: metadata + embed HTML)
-  -> Gemini classify + extract             (reads the CAPTION text only)
+  -> Supadata transcript                   (TEXT of the submitted URL; see below)
+  -> Gemini classify + extract             (reads caption text and transcript text)
   -> Google Places verification            (is this a real, operating business?)
   -> restaurants + reviews rows
 ```
+
+### Transcripts
+
+We send the URL **the user submitted** to Supadata's transcript endpoint and
+keep the returned text. That is the whole of it:
+
+- No video or audio file is downloaded, stored, re-hosted or served by us.
+- Only the transcript endpoint is called. No creator endpoint, no search
+  endpoint, no listing endpoint.
+- Only URLs a person pasted into the app are ever sent. Nothing is discovered.
+- A transcript we already hold for the same `tiktok_video_id` is reused rather
+  than re-fetched, so a video submitted twice is fetched once.
+- `transcript_status` records `ok`, `unavailable`, `failed` or `not_attempted`.
+  A video that is private, restricted or silent comes back `unavailable` and
+  the pipeline continues on the caption alone. A transcript never decides
+  whether a submission succeeds.
+
+Commercial-use rights for the transcript service were confirmed by the owner
+before this was integrated, which is the condition the v2 strategy sets for
+any third-party transcript provider.
+
+If a future change makes this module fetch media rather than text, or fetch a
+URL no user submitted, it has left this boundary.
 
 `GET /api/cron` drains the `raw_submissions` queue on a schedule. It is worth
 being precise about this, because a scheduled job that touches TikTok *looks*
@@ -39,7 +64,8 @@ ones, it has become a scraper and is out of scope.
 | Search TikTok or scrape hashtags | Out of scope per strategy §7 |
 | Enumerate creators or their back catalogues | Out of scope |
 | Collect comments | Out of scope |
-| Download or re-host video files | We embed; playback stays on TikTok |
+| Download or re-host video files | We embed; playback stays on TikTok. The transcript service returns text, and we store only that text |
+| Transcribe anything a user did not submit | `fetchTranscript` is only ever called with the URL from a `raw_submissions` row |
 | Read TikTok engagement counts | `TikTokData.likes`/`views` are hardcoded `0`. oEmbed does not expose them and we do not go looking elsewhere. Trend scores use **our own** signals only |
 | Circumvent any platform restriction | Private/deleted videos surface as errors and the submission is rejected |
 

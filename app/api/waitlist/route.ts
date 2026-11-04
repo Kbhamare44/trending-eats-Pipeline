@@ -20,6 +20,7 @@
 import type { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 import { ok, badRequest, serverError } from '@/lib/http/respond';
+import { inMemoryLimit, clientKey, LIMITS, tooManyRequests } from '@/lib/http/ratelimit';
 import { NextResponse } from 'next/server';
 
 /** Postgres "relation does not exist". */
@@ -45,6 +46,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return badRequest('A JSON body is required');
+    }
+
+    // The upsert below already makes a repeat harmless, so this is about
+    // stopping someone enumerating addresses into the table rather than about
+    // duplicates.
+    const limit = inMemoryLimit(
+      `waitlist:${clientKey(request)}`,
+      LIMITS.waitlistPerHour,
+      60 * 60 * 1000
+    );
+    if (!limit.allowed) {
+      return tooManyRequests('Too many sign-ups from here. Try later.', limit.retryAfterSeconds);
     }
 
     const { email, city, source } = body as Record<string, unknown>;

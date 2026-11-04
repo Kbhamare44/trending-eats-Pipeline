@@ -62,7 +62,9 @@ export async function GET(request: NextRequest) {
     // submissions into a batch of retries.
     const outcomes = [];
     for (const submission of pending) {
-      outcomes.push(await drainSubmission(submission.id));
+      // bypassGate: the cron IS the serial path, so the concurrency gate
+      // that flattens bursts from /api/submit must not turn it away.
+      outcomes.push(await drainSubmission(submission.id, { bypassGate: true }));
     }
 
     // A rejected submission is NOT a failure: "that video was not a

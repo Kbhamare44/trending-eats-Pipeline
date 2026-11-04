@@ -12,9 +12,12 @@ import {
   isSubmittableTikTokUrl,
 } from '../lib/pipeline/tiktok';
 import { QUEUE_CONFIG, isTerminalStatus } from '../lib/config/pipeline';
+import { inMemoryLimit, clientKey, LIMITS } from '../lib/http/ratelimit';
 
 let passed = 0;
 let failed = 0;
+
+async function run() {
 
 function check(label: string, actual: unknown, expected: unknown) {
   const a = JSON.stringify(actual);
@@ -113,5 +116,83 @@ check('maxAttempts is at least 1', QUEUE_CONFIG.maxAttempts >= 1, true);
 check('batchSize is positive', QUEUE_CONFIG.batchSize > 0, true);
 check('stuck threshold is positive', QUEUE_CONFIG.stuckAfterMinutes > 0, true);
 
+// ── Rate limiting ────────────────────────────────────────
+// The limiter guards endpoints that cost money per call, so the boundary
+// behaviour matters: an off-by-one here either blocks real people or lets a
+// loop through.
+const WINDOW = 60_000;
+const key = `test:${Math.random()}`;
+let lastAllowed = true;
+for (let i = 1; i <= 3; i++) {
+  lastAllowed = inMemoryLimit(key, 3, WINDOW).allowed;
+}
+check('the limit allows exactly `max` requests', lastAllowed, true);
+check('request max+1 is blocked', inMemoryLimit(key, 3, WINDOW).allowed, false);
+check(
+  'a blocked response carries a positive Retry-After',
+  inMemoryLimit(key, 3, WINDOW).retryAfterSeconds > 0,
+  true
+);
+
+// A different caller must not inherit someone else's exhausted budget.
+check(
+  'a different key has its own budget',
+  inMemoryLimit(`other:${Math.random()}`, 3, WINDOW).allowed,
+  true
+);
+
+// A window that has already elapsed must reset rather than stay blocked
+// forever — the bug that would silently lock out every user after a spike.
+const expiring = `expire:${Math.random()}`;
+inMemoryLimit(expiring, 1, 1);
+await new Promise((r) => setTimeout(r, 5));
+check('an elapsed window resets', inMemoryLimit(expiring, 1, 1).allowed, true);
+
+// ── Caller identity ─────────────────────────────────────
+// The user id must win over the IP: it is the only identifier a caller cannot
+// trivially change, and keying a signed-in user by IP would make everyone
+// behind one NAT share a budget.
+const req = (headers: Record<string, string>) =>
+  new Request('https://example.test/api/submit', { headers });
+
+check(
+  'an authenticated caller is keyed by user id',
+  clientKey(req({ 'x-forwarded-for': '1.2.3.4' }), 'user-abc'),
+  'user:user-abc'
+);
+check(
+  'an anonymous caller is keyed by the leftmost forwarded address',
+  clientKey(req({ 'x-forwarded-for': '1.2.3.4, 10.0.0.1, 10.0.0.2' })),
+  'ip:1.2.3.4'
+);
+check(
+  'x-real-ip is the fallback',
+  clientKey(req({ 'x-real-ip': '5.6.7.8' })),
+  'ip:5.6.7.8'
+);
+check(
+  'an unidentifiable caller gets the shared bucket',
+  clientKey(req({})),
+  'ip:unknown'
+);
+
+// ── Limit sanity ─────────────────────────────────────────
+check('every limit is positive', Object.values(LIMITS).every((v) => v > 0), true);
+check(
+  'anonymous submitters get no more than signed-in ones',
+  LIMITS.submitAnonymousPerHour >= LIMITS.submitPerUserPerHour ? 'anon >= user' : 'ok',
+  'ok'
+);
+
+// ── Burst flattening ────────────────────────────────────
+// The gate exists because /api/submit no longer blocks for the pipeline, so
+// a seeding run starts a new one every few seconds while others run. If this
+// is ever raised to the batch size, a burst stops being flattened at all.
+check('concurrent drains are gated below the batch size', QUEUE_CONFIG.maxConcurrentDrains < QUEUE_CONFIG.batchSize, true);
+check('at least one drain can run', QUEUE_CONFIG.maxConcurrentDrains >= 1, true);
+
 console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+  if (failed > 0) process.exit(1);
+}
+
+run();

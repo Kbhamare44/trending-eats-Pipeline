@@ -1,4 +1,5 @@
 import { fetchTikTokData } from './tiktok';
+import { fetchTranscript, saveTranscript } from './transcript';
 import { classifyContent } from '@/lib/gemini/classify';
 import { extractRestaurantData } from '@/lib/gemini/extract';
 import { findRestaurant } from '@/lib/google/places';
@@ -47,6 +48,32 @@ export async function processSubmission(
         rejectionReason: 'No caption available to process',
       });
       return { success: false, rejectionReason: 'No caption' };
+    }
+
+    // ── Step 1b: Transcript ────────────────────────────
+    // Runs here, in the background worker, never in the request path.
+    //
+    // NOT YET PASSED TO THE PROMPTS. Combining caption and transcript changes
+    // what Gemini is asked, and a prompt change is reviewed before it ships,
+    // so this pass fetches and stores transcripts only. Storing them first is
+    // also what makes the comparison possible: scripts/measure-transcript.ts
+    // replays stored transcripts against caption-only extraction to find out
+    // whether the transcript is worth its cost per submission.
+    //
+    // A transcript never fails a submission — fetchTranscript resolves to a
+    // status instead of throwing, and nothing below branches on it.
+    const transcript = await fetchTranscript(tiktokUrl, {
+      videoId: tiktokData.videoId || null,
+      captionLength: tiktokData.caption.length,
+    });
+    await saveTranscript(submissionId, transcript);
+    if (transcript.status !== 'not_attempted') {
+      console.log(
+        `[Pipeline] transcript ${transcript.status}` +
+          (transcript.source ? ` via ${transcript.source}` : '') +
+          (transcript.text ? ` (${transcript.text.length} chars)` : '') +
+          (transcript.detail ? ` — ${transcript.detail}` : '')
+      );
     }
 
     // ── Step 2: Classify content ───────────────────────
