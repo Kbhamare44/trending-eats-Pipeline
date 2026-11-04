@@ -76,6 +76,19 @@ export interface PairingResult {
     restaurantsConsidered: number;
     activitiesConsidered: number;
     routesCalled: number;
+    /**
+     * Set when the activity search could not run at all.
+     *
+     * This exists because the first version of this code was quietly
+     * dishonest in exactly the way the rest of the codebase is built to
+     * avoid. When the Places key is denied — billing disabled, or the API
+     * not enabled on the project — findNearbyActivities throws, the loop
+     * caught it and continued, and the response said "we need restaurants
+     * with something walkable nearby". That is a false statement about
+     * Toronto. The truth was that we never asked Google.
+     */
+    searchFailed: boolean;
+    searchError: string | null;
   };
 }
 
@@ -191,14 +204,20 @@ export async function buildPairings(options: {
   const pairings: OutingPairing[] = [];
   let activitiesConsidered = 0;
   let routesCalled = 0;
+  let searchAttempts = 0;
+  let searchFailures = 0;
+  let firstError: string | null = null;
 
   for (const restaurant of candidates) {
     if (pairings.length >= limit) break;
 
     let nearby: NearbyActivity[] = [];
+    searchAttempts++;
     try {
       nearby = await findNearbyActivities(restaurant.latitude, restaurant.longitude);
     } catch (err: any) {
+      searchFailures++;
+      if (!firstError) firstError = err?.message ?? String(err);
       console.warn(`[Outings] nearby search failed for ${restaurant.name}: ${err.message}`);
       continue;
     }
@@ -266,17 +285,30 @@ export async function buildPairings(options: {
     });
   }
 
+  // Every attempt failing means the provider is unreachable, not that the
+  // neighbourhood is empty. Saying the wrong one of those sends somebody to
+  // look for a bug in their own city.
+  const searchFailed = searchAttempts > 0 && searchFailures === searchAttempts;
+
+  let resolvedNote = note;
+  if (searchFailed) {
+    resolvedNote = 'We could not reach the activity search just now. Try again shortly.';
+  } else if (pairings.length === 0) {
+    resolvedNote = 'Nothing to pair yet — we need restaurants with something walkable nearby.';
+  }
+
   return {
     pairings,
     meta: {
       basis,
-      note:
-        pairings.length === 0
-          ? 'Nothing to pair yet — we need restaurants with something walkable nearby.'
-          : note,
+      note: resolvedNote,
       restaurantsConsidered: candidates.length,
       activitiesConsidered,
       routesCalled,
+      searchFailed,
+      // The provider's own words, which is what makes a denied key
+      // diagnosable from the response instead of only from the logs.
+      searchError: searchFailed ? firstError : null,
     },
   };
 }

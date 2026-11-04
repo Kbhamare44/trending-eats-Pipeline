@@ -122,5 +122,25 @@ check(
   true
 );
 
+// ── "Could not ask" must not be reported as "nothing nearby" ─────────────
+// The first version of buildPairings caught a denied Places key and told the
+// user their city had nothing walkable in it. These assertions pin the
+// distinction into the source so it cannot regress silently.
+check(
+  'pairing distinguishes a failed search from an empty one',
+  /searchFailed/.test(pairSource),
+  true
+);
+check(
+  'a total search failure does not claim nothing is nearby',
+  /could not reach the activity search/i.test(pairSource),
+  true
+);
+check(
+  "the provider's error is surfaced, not just logged",
+  /searchError/.test(pairSource),
+  true
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
