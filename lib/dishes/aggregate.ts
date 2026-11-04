@@ -221,6 +221,10 @@ export async function resolveDish(raw: string): Promise<ResolvedDish | null> {
             candidateName: top.name ?? top.slug ?? '',
             similarity,
           };
+          // Persisted on the new dish below via `reviewColumns`. Until the
+          // review_reason/review_similarity columns existed this flag was
+          // only logged and counted, which meant it lived in the Vercel logs
+          // and nowhere a person would ever look.
           console.log(
             `[Dishes] possible duplicate: "${classification.normalized}" ~ ` +
               `"${review.candidateName}" at ${similarity.toFixed(3)} ` +
@@ -248,6 +252,17 @@ export async function resolveDish(raw: string): Promise<ResolvedDish | null> {
             embedding: toPgVector(vector),
             embedding_model: EMBEDDING_MODEL_TAG,
             embedded_at: new Date().toISOString(),
+          }
+        : {}),
+      // The possible-duplicate flag, recorded on the dish itself so it can be
+      // found with a query instead of by reading logs:
+      //   select name, review_reason, review_similarity
+      //     from dishes where review_reason is not null
+      //     order by review_similarity desc;
+      ...(review
+        ? {
+            review_reason: `possible duplicate of "${review.candidateName}"`.slice(0, 200),
+            review_similarity: review.similarity,
           }
         : {}),
     })
