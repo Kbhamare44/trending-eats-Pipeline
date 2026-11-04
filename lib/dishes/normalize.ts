@@ -116,6 +116,14 @@ export function normalizeDishName(raw: string): string {
 
   s = s
     .toLowerCase()
+    // Fold accents BEFORE the alphanumeric filter below. Without this, the
+    // filter replaces every accented letter with a space: "crème brûlée"
+    // became "cr me br l e" with the slug "crme-brle", so it could never
+    // group with "creme brulee" and its URL was nonsense. The same applied to
+    // jalapeño, açaí, bánh mì, pâté and entrée. NFD splits a letter into its
+    // base plus a combining mark; the range below removes only the marks.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9\s'-]/g, ' ')   // keep intra-word ' and -
     .replace(/'/g, '')                // their's -> theirs, don't -> dont
@@ -163,9 +171,21 @@ export function normalizeDishName(raw: string): string {
   return s;
 }
 
-/** URL-safe slug from a normalized name. */
+/**
+ * URL-safe slug from an ALREADY-NORMALIZED name.
+ *
+ * The accent fold is repeated here defensively. Callers are supposed to pass
+ * the output of normalizeDishName, but the parameter is a plain string and
+ * nothing stops someone passing a raw one — in which case stripping
+ * non-[a-z0-9] below would silently turn "crème brûlée" into "crme-brle" and
+ * mint a dish at a nonsense URL.
+ */
 export function dishSlug(normalized: string): string {
-  return normalized.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  return normalized
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
 }
 
 /** Title Case for display: "matcha croissant" -> "Matcha Croissant". */

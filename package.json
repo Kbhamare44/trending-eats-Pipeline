@@ -14,7 +14,9 @@
     "recompute": "tsx scripts/recompute.ts",
     "check:geo": "tsx scripts/check-geo.ts",
     "check:queue": "tsx scripts/check-queue.ts",
-    "check:map": "tsx scripts/check-map.ts"
+    "check:map": "tsx scripts/check-map.ts",
+    "check:embeddings": "tsx scripts/check-embeddings.ts",
+    "backfill:embeddings": "tsx scripts/backfill-embeddings.ts"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",
