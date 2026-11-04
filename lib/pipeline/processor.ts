@@ -11,7 +11,6 @@ import {
   upsertCreator,
   refreshRestaurantPlaceData,
 } from '@/lib/supabase/queries';
-import { syncRestaurantDishes } from '@/lib/dishes/aggregate';
 import { isGta } from '@/lib/geo/gta';
 
 export interface ProcessingResult {
@@ -34,8 +33,9 @@ export async function processSubmission(
   console.log(`[Pipeline] Starting: ${submissionId}`);
 
   try {
-    // Mark as processing
-    await updateSubmissionStatus(submissionId, 'processing');
+    // NOTE: the row is already marked `processing` by claimSubmission() in
+    // lib/pipeline/worker.ts. Setting it here as well would be harmless but
+    // misleading — the claim is what makes it exclusive, not this write.
 
     // ── Step 1: Fetch TikTok data ──────────────────────
     console.log(`[Pipeline] Fetching TikTok data...`);
@@ -136,18 +136,9 @@ export async function processSubmission(
       await upsertCreator(tiktokData.creatorUsername, extraction.isSponsored);
     }
 
-    // ── Step 8: Link dishes so they are rankable across restaurants ───
-    // Failure here must not fail the submission: the restaurant and its
-    // review are already saved, and the recompute cron re-syncs dishes.
-    try {
-      const dishResult = await syncRestaurantDishes(restaurantId);
-      console.log(
-        `[Pipeline] Linked ${dishResult.dishesLinked} dish(es), ` +
-          `${dishResult.mentionsRecorded} mention(s)`
-      );
-    } catch (dishError: any) {
-      console.warn(`[Pipeline] Dish sync failed: ${dishError.message}`);
-    }
+    // Dish linking, review aggregation and the trend refresh all happen in
+    // lib/pipeline/worker.ts once this returns. They used to run here too,
+    // which meant every submission did the dish sync twice.
 
     // ── Mark complete ──────────────────────────────────
     await updateSubmissionStatus(submissionId, 'completed');
@@ -171,10 +162,11 @@ export async function processSubmission(
     };
 
   } catch (error: any) {
+    // Deliberately NOT marked `failed` here. A Gemini 503 or a Places rate
+    // limit is transient, and writing a terminal status would retire the
+    // submission on its first bad minute. The worker owns that decision: it
+    // knows the attempt count and either requeues or gives up.
     console.error(`[Pipeline] Failed:`, error.message);
-    await updateSubmissionStatus(submissionId, 'failed', {
-      errorMessage: error.message,
-    });
-    return { success: false, error: error.message };
+    throw error;
   }
 }

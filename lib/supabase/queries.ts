@@ -249,3 +249,210 @@ export async function upsertCreator(
     });
   }
 }
+// ── Submission queue ─────────────────────────────────────
+//
+// These back the async submission pipeline. /api/submit no longer processes a
+// link in the request path; it enqueues a row and returns, and the work is
+// done by a background worker (next/server `after`) with the cron as the
+// safety net. That means two workers can race for the same row, so claiming
+// has to be atomic — see claimSubmission.
+
+import { QUEUE_CONFIG, isTerminalStatus } from '@/lib/config/pipeline';
+
+export { isTerminalStatus };
+
+export interface SubmissionRecord {
+  id: string;
+  status: string;
+  tiktok_url: string;
+  tiktok_video_id: string | null;
+  attempts: number;
+  rejection_reason: string | null;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export async function getSubmissionById(
+  submissionId: string
+): Promise<SubmissionRecord | null> {
+  const { data, error } = await supabase
+    .from('raw_submissions')
+    .select(
+      'id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at'
+    )
+    .eq('id', submissionId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load submission: ${error.message}`);
+  return (data as SubmissionRecord | null) ?? null;
+}
+
+/**
+ * The restaurant a completed submission produced, resolved through the review
+ * it created. `reviews.submission_id` is the only link between the two.
+ */
+export async function getSubmissionOutcome(
+  submissionId: string
+): Promise<{ restaurantId: string; restaurantName: string } | null> {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('restaurant_id, restaurants(name)')
+    .eq('submission_id', submissionId)
+    .maybeSingle();
+
+  if (error || !data?.restaurant_id) return null;
+
+  const joined = (data as any).restaurants;
+  const name = Array.isArray(joined) ? joined[0]?.name : joined?.name;
+  return { restaurantId: data.restaurant_id as string, restaurantName: name ?? '' };
+}
+
+/**
+ * Has this exact video already produced a review? Used by /api/submit to
+ * answer a duplicate submission immediately instead of paying for the whole
+ * pipeline to rediscover it.
+ */
+export async function findReviewByVideoId(
+  videoId: string
+): Promise<{ restaurantId: string; restaurantName: string } | null> {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('restaurant_id, restaurants(name)')
+    .eq('tiktok_video_id', videoId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.restaurant_id) return null;
+
+  const joined = (data as any).restaurants;
+  const name = Array.isArray(joined) ? joined[0]?.name : joined?.name;
+  return { restaurantId: data.restaurant_id as string, restaurantName: name ?? '' };
+}
+
+/**
+ * An in-flight submission for the same URL, so double-tapping Submit returns
+ * the first submission's id rather than queueing the same work twice.
+ */
+export async function findOpenSubmissionByUrl(
+  tiktokUrl: string
+): Promise<SubmissionRecord | null> {
+  const { data, error } = await supabase
+    .from('raw_submissions')
+    .select(
+      'id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at'
+    )
+    .eq('tiktok_url', tiktokUrl)
+    .in('status', ['pending', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return null;
+  return (data as SubmissionRecord | null) ?? null;
+}
+
+/**
+ * Atomically take ownership of a pending submission.
+ *
+ * The `.eq('status', 'pending')` in the UPDATE is the whole point: it makes
+ * the claim a compare-and-set. Two workers running at once both issue this
+ * statement, Postgres serialises them, and only the first sees a row come
+ * back. Checking the status with a SELECT and then updating would let both
+ * through and run the pipeline — and bill Gemini and Places — twice.
+ *
+ * Returns the new attempt number, or null if somebody else got there first.
+ */
+export async function claimSubmission(
+  submissionId: string,
+  currentAttempts: number
+): Promise<number | null> {
+  const nextAttempts = currentAttempts + 1;
+
+  const { data, error } = await supabase
+    .from('raw_submissions')
+    .update({ status: 'processing', attempts: nextAttempts })
+    .eq('id', submissionId)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to claim submission: ${error.message}`);
+  return data ? nextAttempts : null;
+}
+
+/**
+ * A claimed submission hit a transient error. Put it back in the queue, or
+ * give up if it has used all its attempts.
+ */
+export async function releaseSubmission(
+  submissionId: string,
+  attempts: number,
+  errorMessage: string
+): Promise<'retry' | 'failed'> {
+  const exhausted = attempts >= QUEUE_CONFIG.maxAttempts;
+
+  const { error } = await supabase
+    .from('raw_submissions')
+    .update({
+      status: exhausted ? 'failed' : 'pending',
+      error_message: errorMessage.slice(0, 500),
+      ...(exhausted ? { processed_at: new Date().toISOString() } : {}),
+    })
+    .eq('id', submissionId);
+
+  if (error) {
+    console.error(`[Queue] Could not release ${submissionId}: ${error.message}`);
+  }
+
+  return exhausted ? 'failed' : 'retry';
+}
+
+/**
+ * Rescue rows abandoned mid-processing.
+ *
+ * A worker that is killed by the platform timeout leaves its row in
+ * `processing` forever: the cron only looks for `pending`, so nothing retries
+ * it and the user's submission silently never appears. Rows past their
+ * attempt budget go straight to `failed` instead of looping.
+ */
+export async function requeueStuckSubmissions(): Promise<{
+  requeued: number;
+  failed: number;
+}> {
+  const cutoff = new Date(
+    Date.now() - QUEUE_CONFIG.stuckAfterMinutes * 60_000
+  ).toISOString();
+
+  const { data: stuck, error } = await supabase
+    .from('raw_submissions')
+    .select('id, attempts')
+    .eq('status', 'processing')
+    .lt('created_at', cutoff);
+
+  if (error) throw new Error(`Failed to scan for stuck rows: ${error.message}`);
+  if (!stuck?.length) return { requeued: 0, failed: 0 };
+
+  const toRequeue = stuck.filter((r: any) => r.attempts < QUEUE_CONFIG.maxAttempts);
+  const toFail = stuck.filter((r: any) => r.attempts >= QUEUE_CONFIG.maxAttempts);
+
+  if (toRequeue.length) {
+    await supabase
+      .from('raw_submissions')
+      .update({ status: 'pending' })
+      .in('id', toRequeue.map((r: any) => r.id));
+  }
+
+  if (toFail.length) {
+    await supabase
+      .from('raw_submissions')
+      .update({
+        status: 'failed',
+        error_message: `Gave up after ${QUEUE_CONFIG.maxAttempts} attempts`,
+        processed_at: new Date().toISOString(),
+      })
+      .in('id', toFail.map((r: any) => r.id));
+  }
+
+  return { requeued: toRequeue.length, failed: toFail.length };
+}

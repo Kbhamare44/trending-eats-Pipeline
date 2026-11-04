@@ -9,34 +9,35 @@
  * verify the restaurant against Google Places. We do not download the video,
  * and the embed is rendered in a WebView so playback stays with TikTok.
  *
- * Change from the previous version: `userId` is no longer read from the body.
- * It was unverified, so any caller could attribute submissions to any user —
- * which also fed the creator and trend stats. It now comes from the bearer
- * token, and anonymous submissions are allowed with a null submitter.
+ * THIS ROUTE NO LONGER PROCESSES THE LINK. It validates, deduplicates, writes
+ * a `pending` row and returns — typically in well under a second. The pipeline
+ * runs in the background (see lib/pipeline/worker.ts) and the app polls
+ * GET /api/submissions/:id for the outcome.
+ *
+ * Why: processing inline meant a 10-30 second spinner, which users read as a
+ * broken app, and a function timeout mid-pipeline left the row stranded in
+ * `processing` with nothing to retry it.
  */
 
 import type { NextRequest } from 'next/server';
-import { createRawSubmission } from '@/lib/supabase/queries';
-import { processSubmission } from '@/lib/pipeline/processor';
-import { aggregateRestaurantReviews } from '@/lib/pipeline/aggregator';
-import { recomputeRestaurantTrends } from '@/lib/trends/recompute';
+import { after } from 'next/server';
+import {
+  createRawSubmission,
+  findReviewByVideoId,
+  findOpenSubmissionByUrl,
+} from '@/lib/supabase/queries';
+import { extractVideoId, isSubmittableTikTokUrl } from '@/lib/pipeline/tiktok';
+import { drainSubmission } from '@/lib/pipeline/worker';
 import { getAuthedUser } from '@/lib/auth/verify';
 import { ok, badRequest, serverError } from '@/lib/http/respond';
 
-/** oEmbed + two Gemini calls + two Places calls. */
-export const maxDuration = 120;
-
-function looksLikeTikTokUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return (
-      parsed.protocol === 'https:' &&
-      /(^|\.)tiktok\.com$/.test(parsed.hostname)
-    );
-  } catch {
-    return false;
-  }
-}
+/**
+ * The HTTP response itself takes milliseconds, but work scheduled with
+ * `after()` runs inside this same invocation and is bounded by the same limit,
+ * so the pipeline needs the headroom. If the platform kills it anyway, the row
+ * stays `processing` and requeueStuckSubmissions() rescues it.
+ */
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,28 +56,66 @@ export async function POST(request: NextRequest) {
 
     // Parse the host properly rather than substring-matching "tiktok.com",
     // which would also accept something like https://tiktok.com.evil.test/x.
-    if (!looksLikeTikTokUrl(url)) {
+    if (!isSubmittableTikTokUrl(url)) {
       return badRequest('That does not look like a TikTok link');
     }
 
-    const user = await getAuthedUser(request);
-
-    const submissionId = await createRawSubmission(url, user?.id ?? null);
-    const result = await processSubmission(submissionId, url);
-
-    if (result.success && result.restaurantId) {
-      await aggregateRestaurantReviews(result.restaurantId);
-
-      // A new submission is itself a trend signal, so refresh scores now
-      // rather than making the user wait for the scheduled recompute.
-      try {
-        await recomputeRestaurantTrends();
-      } catch (trendError: any) {
-        console.warn('[Submit] trend recompute failed:', trendError.message);
+    // ── Dedupe before spending anything ────────────────
+    // A link that already produced a review needs no pipeline run at all.
+    // This is free (one indexed lookup) and saves an oEmbed call, two Gemini
+    // calls and two Places calls per duplicate.
+    const videoId = extractVideoId(url);
+    if (videoId) {
+      const existing = await findReviewByVideoId(videoId);
+      if (existing) {
+        return ok({
+          submissionId: null,
+          status: 'completed',
+          duplicate: true,
+          restaurantId: existing.restaurantId,
+          restaurantName: existing.restaurantName,
+          message: 'We already have this video.',
+        });
       }
     }
 
-    return ok({ submissionId, ...result });
+    // Double-tapping Submit should return the first submission, not queue the
+    // same work twice.
+    const inFlight = await findOpenSubmissionByUrl(url);
+    if (inFlight) {
+      return ok({
+        submissionId: inFlight.id,
+        status: inFlight.status,
+        duplicate: true,
+        message: 'This link is already being processed.',
+      });
+    }
+
+    // `userId` is not read from the body. It used to be, unverified, so any
+    // caller could attribute submissions to any user — which also fed the
+    // creator and trend stats. Anonymous submissions are allowed, with a null
+    // submitter.
+    const user = await getAuthedUser(request);
+    const submissionId = await createRawSubmission(url, user?.id ?? null);
+
+    // Fast path: start draining as soon as the response is on the wire. If
+    // this invocation dies first, the row is simply left `pending` and the
+    // cron picks it up — which is why this is best-effort and not awaited.
+    after(async () => {
+      try {
+        const outcome = await drainSubmission(submissionId);
+        console.log('[Submit/after]', JSON.stringify(outcome));
+      } catch (err: any) {
+        console.error('[Submit/after] unexpected:', err?.message ?? err);
+      }
+    });
+
+    return ok({
+      submissionId,
+      status: 'pending',
+      duplicate: false,
+      message: "We're looking into this — it'll appear on the map shortly.",
+    });
   } catch (err) {
     return serverError(err, 'API/submit');
   }

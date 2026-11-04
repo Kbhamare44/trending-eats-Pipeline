@@ -1,0 +1,63 @@
+# Drain the submission queue on a short cycle.
+#
+# WHY NOT vercel.json: the plan here is Vercel Hobby, which rejects any cron
+# that runs more than once per day ("Hobby accounts are limited to daily cron
+# jobs"). The step-by-step plan called for `* * * * *` on /api/cron; that would
+# fail the deploy outright. vercel.json keeps the daily run as a floor and this
+# workflow supplies the short cycle.
+#
+# WHY IT IS ONLY A SAFETY NET: /api/submit now starts draining each row itself
+# with next/server `after()`, so a healthy submission is processed seconds
+# after it is enqueued and never waits for a schedule. This exists for what
+# that cannot cover — an invocation killed by the platform timeout, a row
+# abandoned in `processing`, or a transient Gemini/Places failure awaiting its
+# retry. GitHub's own minimum is 5 minutes, and in practice runs are often
+# 5-20 minutes late, so do not treat this as a latency guarantee.
+#
+# SETUP: the CRON_SECRET repository secret, shared with recompute.yml. See the
+# header of that file.
+
+name: drain-submissions
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: drain-submissions
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /api/cron
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PIPELINE_URL: ${{ vars.PIPELINE_URL || 'https://trending-eats-pipeline.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repository secret is not set."
+            exit 1
+          fi
+
+          curl --silent --show-error --fail-with-body \
+               --max-time 310 \
+               --retry 2 --retry-delay 10 --retry-all-errors \
+               -H "Authorization: Bearer $CRON_SECRET" \
+               "$PIPELINE_URL/api/cron" \
+            | tee response.json
+
+          echo
+          python3 - <<'PY'
+          import json
+          body = json.load(open('response.json'))
+          data = body.get('data', body)
+          print('--- queue drain ---')
+          for k in ('processed','completed','rejected','retry','failed','skipped',
+                    'stuckRequeued','stuckRetired'):
+              if k in data:
+                  print(f'  {k}: {data[k]}')
+          PY

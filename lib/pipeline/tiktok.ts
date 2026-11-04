@@ -1,8 +1,19 @@
 import axios from 'axios';
 import { TikTokData } from '@/lib/types';
 
-// Extract the video ID from any TikTok URL format
-function extractVideoId(url: string): string | null {
+/**
+ * Extract the video ID from any TikTok URL format.
+ *
+ * Exported because the submit route needs to deduplicate BEFORE doing any
+ * network work: if we already hold a review for this video, there is no point
+ * spending an oEmbed call, two Gemini calls and two Places calls to find that
+ * out. Note that for vt./vm. short links this returns the short code, not the
+ * real video ID — those can only be resolved by following the redirect, so a
+ * short link submitted twice is not caught here. The reviews table still has
+ * the real ID once processing completes, so the second one is caught in the
+ * pipeline rather than at the door.
+ */
+export function extractVideoId(url: string): string | null {
   const patterns = [
     /tiktok\.com\/@[\w.]+\/video\/(\d+)/,
     /tiktok\.com\/v\/(\d+)/,
@@ -14,6 +25,25 @@ function extractVideoId(url: string): string | null {
     if (match) return match[1];
   }
   return null;
+}
+
+/**
+ * Is this a URL we are willing to accept from a user?
+ *
+ * Parses the host rather than substring-matching "tiktok.com". A substring
+ * test also accepts https://tiktok.com.evil.test/x and https://nottiktok.com,
+ * which is how an open redirect or SSRF target gets into a submission queue.
+ * Requires https because the oEmbed call and the embed both need it.
+ */
+export function isSubmittableTikTokUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === 'https:' && /(^|\.)tiktok\.com$/.test(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Validate that the URL is actually a TikTok URL
