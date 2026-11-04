@@ -39,7 +39,7 @@ are easy to erode by accident.
                      |
         restaurants + reviews + dish_mentions
                      |
-      GET /api/cron/recompute   (hourly)
+      GET /api/cron/recompute   (daily on Vercel Hobby; hourly via GitHub Actions)
                      |
    trend scores · dish trends · experience signal · trend_snapshots
                      |
@@ -174,7 +174,7 @@ Scheduled jobs (`vercel.json`):
 | Job | Schedule | Does |
 |---|---|---|
 | `/api/cron` | daily 09:00 | Drain up to 5 pending user submissions |
-| `/api/cron/recompute` | hourly | Trend + dish + experience rollup |
+| `/api/cron/recompute` | daily 10:00 UTC (Vercel) + hourly (GitHub Actions) | Trend + dish + experience rollup |
 
 Both accept `Authorization: Bearer $CRON_SECRET` or `$PIPELINE_SECRET`. Vercel
 Cron sends `CRON_SECRET`; accepting both avoids the silent 401 loop that

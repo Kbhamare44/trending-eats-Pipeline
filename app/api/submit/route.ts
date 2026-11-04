@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       await aggregateRestaurantReviews(result.restaurantId);
 
       // A new submission is itself a trend signal, so refresh scores now
-      // rather than making the user wait for the hourly cron.
+      // rather than making the user wait for the scheduled recompute.
       try {
         await recomputeRestaurantTrends();
       } catch (trendError: any) {

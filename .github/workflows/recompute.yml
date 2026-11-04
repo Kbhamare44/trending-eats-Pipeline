@@ -1,0 +1,74 @@
+# Hourly trend recompute.
+#
+# WHY THIS EXISTS: Vercel's Hobby plan allows at most one cron run per day, so
+# the hourly schedule that used to live in vercel.json is rejected at deploy
+# time ("Hobby accounts are limited to daily cron jobs"). vercel.json now runs
+# /api/cron/recompute once daily as a floor, and this workflow adds the hourly
+# cadence on top. If the project ever moves to Vercel Pro, put the hourly
+# schedule back in vercel.json and delete this file — two schedulers hitting
+# the same endpoint is harmless (the job is idempotent) but confusing.
+#
+# SETUP — one time, in the GitHub repo:
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#     CRON_SECRET    same value as CRON_SECRET in Vercel
+#   Settings -> Secrets and variables -> Actions -> Variables -> New variable
+#     PIPELINE_URL   https://<your-deployment>.vercel.app   (optional; see default below)
+#
+# Secrets are safe in a public repo: GitHub does not expose them to workflows
+# triggered by pull requests from forks, and `schedule` only ever runs on this
+# repository.
+#
+# TWO CAVEATS worth knowing before you rely on this:
+#   1. GitHub's scheduler is best-effort. Runs are commonly 5-20 minutes late
+#      and can be skipped entirely under load. That is fine here — the job is
+#      idempotent and the daily Vercel cron is the guaranteed floor — but do
+#      not read the timestamps as exact.
+#   2. GitHub disables scheduled workflows in a repository with no activity for
+#      60 days. If recomputes quietly stop, check that first.
+
+name: recompute
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: recompute
+  cancel-in-progress: false
+
+jobs:
+  recompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /api/cron/recompute
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PIPELINE_URL: ${{ vars.PIPELINE_URL || 'https://trending-eats-pipeline.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repository secret is not set. See the comment at the top of this file."
+            exit 1
+          fi
+
+          # --max-time guards against the 300s maxDuration on the route.
+          # --fail-with-body makes a non-2xx fail the job but still print the
+          # body, so an auth failure is visible instead of just "exit 22".
+          curl --silent --show-error --fail-with-body \
+               --max-time 310 \
+               --retry 2 --retry-delay 10 --retry-all-errors \
+               -H "Authorization: Bearer $CRON_SECRET" \
+               "$PIPELINE_URL/api/cron/recompute" \
+            | tee response.json
+
+          echo
+          python3 - <<'PY'
+          import json
+          with open('response.json') as f:
+              body = json.load(f)
+          data = body.get('data', body)
+          print('--- recompute summary ---')
+          for k, v in data.items():
+              print(f'  {k}: {json.dumps(v) if isinstance(v, (dict, list)) else v}')
+          PY
