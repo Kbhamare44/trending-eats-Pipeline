@@ -49,6 +49,16 @@ export interface PlaceResult {
   website: string | null;
   googleRating: number | null;
   priceLevel: number | null;
+  /**
+   * How many raters Google reports. Needed by the experience signal: a 4.9
+   * from 6 people is much weaker evidence than a 4.4 from 2,000, and treating
+   * them alike was making thin ratings look authoritative.
+   */
+  googleRatingCount?: number | null;
+  /** Attribution strings that must be displayed with any Google-sourced field. */
+  attribution?: string[];
+  /** When these fields were pulled — Places caching terms are time-limited. */
+  fetchedAt?: string;
 }
 
 // Final processed submission

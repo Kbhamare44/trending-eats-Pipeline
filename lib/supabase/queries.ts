@@ -107,14 +107,50 @@ export async function createRestaurant(
       phone: place.phone,
       website: place.website,
       google_rating: place.googleRating,
+      google_rating_count: place.googleRatingCount ?? null,
+      google_data_refreshed_at: place.fetchedAt ?? new Date().toISOString(),
       price_level: place.priceLevel,
       cuisine_type: extraction.cuisine,
+      // is_gta and region are set by the te_restaurant_geography trigger.
     })
     .select('id')
     .single();
 
   if (error) throw new Error(`Failed to create restaurant: ${error.message}`);
   return data.id;
+}
+
+/**
+ * Refresh the Google-sourced fields on an existing restaurant.
+ *
+ * Places terms do not allow retaining most fields indefinitely, so a
+ * restaurant we saw months ago should have its rating re-pulled rather than
+ * displayed from a stale cache.
+ */
+export async function refreshRestaurantPlaceData(
+  restaurantId: string,
+  place: PlaceResult
+): Promise<void> {
+  const { error } = await supabase
+    .from('restaurants')
+    .update({
+      address: place.address,
+      city: place.city,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      phone: place.phone,
+      website: place.website,
+      google_rating: place.googleRating,
+      google_rating_count: place.googleRatingCount ?? null,
+      google_data_refreshed_at: place.fetchedAt ?? new Date().toISOString(),
+      price_level: place.priceLevel,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', restaurantId);
+
+  if (error) {
+    console.warn(`[Queries] Place refresh failed for ${restaurantId}: ${error.message}`);
+  }
 }
 
 // ── Reviews ──────────────────────────────────────────────

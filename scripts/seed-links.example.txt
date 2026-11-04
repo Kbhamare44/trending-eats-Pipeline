@@ -1,0 +1,16 @@
+# TikTok links to seed the GTA pilot — one per line.
+#
+# How to fill this in: browse TikTok yourself, find GTA restaurant videos,
+# tap Share -> Copy link, and paste the links here. Blank lines and lines
+# starting with # are ignored.
+#
+# Aim for a spread that makes the trend engine meaningful:
+#   - 25+ restaurants, so a ranking has something to rank
+#   - multiple videos for the SAME restaurant (that is what drives the
+#     submission-growth component and unlocks the AI summary at 2+)
+#   - repeated DISHES across different restaurants (a dish needs 2+ venues
+#     before it can rank as a local trend)
+#   - several GTA cities, so the city filters are not all empty
+#
+# https://www.tiktok.com/@someone/video/1234567890123456789
+# https://vt.tiktok.com/ABCDEF/
