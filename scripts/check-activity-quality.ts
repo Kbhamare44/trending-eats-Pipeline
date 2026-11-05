@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { activityQuality, activityScore, activityReason, type ActivityEvidence } from '../lib/outings/quality';
+const sample = (types: string[], extra: Partial<ActivityEvidence> = {}): ActivityEvidence => ({ name: 'Example', types, primaryType: null, businessStatus: 'OPERATIONAL', googleRating: null, googleRatingCount: null, ...extra });
+let passed = 0;
+function check(label: string, fn: () => void) { fn(); passed++; console.log('PASS', label); }
+const electronics = sample(['electronics_store','movie_theater','store'], { name: 'TV Electronics', googleRating: 4.9, googleRatingCount: 300 });
+const cinema = sample(['movie_theater','establishment'], { googleRating: 4.4, googleRatingCount: 250 });
+const park = sample(['park','point_of_interest']);
+check('electronics store is rejected even if also classified as a cinema', () => assert.equal(activityQuality(electronics), null));
+check('well-reviewed operational cinema is accepted', () => assert.equal(activityQuality(cinema)?.category, 'movie_theater'));
+check('unrated park is accepted with unknown rating', () => assert.equal(activityQuality(park)?.category, 'park'));
+check('generic establishment alone is not recreation', () => assert.equal(activityQuality(sample(['point_of_interest','establishment'])), null));
+check('office and warehouse excluded', () => { assert.equal(activityQuality(sample(['corporate_office'])), null); assert.equal(activityQuality(sample(['storage','tourist_attraction'])), null); });
+check('dealership excluded', () => assert.equal(activityQuality(sample(['car_dealer','tourist_attraction'])), null));
+check('temporarily closed cinema is excluded', () => assert.equal(activityQuality({ ...cinema, businessStatus: 'CLOSED_TEMPORARILY' }), null));
+check('permanently closed park is excluded', () => assert.equal(activityQuality({ ...park, businessStatus: 'CLOSED_PERMANENTLY' }), null));
+check('unknown operating status does not invent open now', () => assert.ok(activityQuality({ ...park, businessStatus: null })));
+check('low review count alone does not exclude a park', () => assert.ok(activityQuality({ ...park, googleRating: 4.3, googleRatingCount: 3 })));
+check('well-evidenced poor ratings are filtered', () => assert.equal(activityQuality({ ...cinema, googleRating: 2.8 }), null));
+check('sparse ratings have less influence than established ones', () => assert.ok(activityScore({ ...cinema, googleRatingCount: 250 },500) > activityScore({ ...cinema, googleRatingCount: 1 },500)));
+check('shorter walking distance improves equal candidates', () => assert.ok(activityScore(cinema,200) > activityScore(cinema,800)));
+check('different activity categories receive a diversity preference', () => assert.ok(activityScore(park,400) > activityScore(cinema,600,true)));
+check('generic gift shop tag does not exclude a museum', () => assert.equal(activityQuality(sample(['museum','store']))?.category,'museum'));
+check('mini golf needs recreational type evidence as well as name', () => {assert.equal(activityQuality(sample(['golf_course'],{name:'Example Mini Golf'}))?.category,'mini_golf');assert.equal(activityQuality(sample(['store'],{name:'Mini Golf Supplies'})),null);});
+check('explanation states facts and labels estimated walking time', () => {const text=activityReason(park,6,false);assert.match(text,/rating unavailable/);assert.match(text,/estimated/);assert.ok(!/open now/i.test(text));});
+check('cinema explanation includes review count', () => assert.match(activityReason(cinema,8,true),/250 Google reviews/));
+console.log(`Activity quality checks: ${passed} passed`);

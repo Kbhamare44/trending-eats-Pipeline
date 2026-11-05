@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "tsc --noEmit && tsx scripts/check-dishes.ts && tsx scripts/check-trends.ts && tsx scripts/check-geo.ts && tsx scripts/check-queue.ts && tsx scripts/check-map.ts && tsx scripts/check-outings.ts && tsx scripts/check-transcript.ts",
+    "check": "tsc --noEmit && tsx scripts/check-dishes.ts && tsx scripts/check-trends.ts && tsx scripts/check-geo.ts && tsx scripts/check-queue.ts && tsx scripts/check-map.ts && tsx scripts/check-outings.ts && tsx scripts/check-transcript.ts && tsx scripts/check-activity-quality.ts && tsx scripts/check-idempotency.ts && tsx scripts/check-outing-budget.ts",
     "check:dishes": "tsx scripts/check-dishes.ts",
     "check:trends": "tsx scripts/check-trends.ts",
     "seed": "tsx scripts/seed-submissions.ts",
@@ -19,7 +19,10 @@
     "backfill:embeddings": "tsx scripts/backfill-embeddings.ts",
     "measure:transcript": "tsx scripts/measure-transcript.ts",
     "check:outings": "tsx scripts/check-outings.ts",
-    "check:transcript": "tsx scripts/check-transcript.ts"
+    "check:transcript": "tsx scripts/check-transcript.ts",
+    "check:activity-quality": "tsx scripts/check-activity-quality.ts",
+    "check:idempotency": "tsx scripts/check-idempotency.ts",
+    "check:outing-budget": "tsx scripts/check-outing-budget.ts"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",

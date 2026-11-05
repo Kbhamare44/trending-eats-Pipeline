@@ -62,7 +62,7 @@ export const OUTING_CONFIG = {
   /** Activity types to search, in order of preference. */
   categories: (
     process.env.OUTING_CATEGORIES ??
-    'movie_theater,museum,art_gallery,bowling_alley,bar,park'
+    'movie_theater,park,museum,art_gallery,bowling_alley,tourist_attraction,amusement_park'
   )
     .split(',')
     .map((c) => c.trim())
@@ -77,7 +77,7 @@ export const OUTING_CONFIG = {
    */
   minActivityRating: num('OUTING_MIN_ACTIVITY_RATING', 3.8),
 
-  /** Ignore ratings from very few people — same reasoning as the experience signal. */
+  /** Evidence floor before a low rating can disqualify a destination. */
   minActivityRatingCount: num('OUTING_MIN_ACTIVITY_RATING_COUNT', 20),
 
   /**

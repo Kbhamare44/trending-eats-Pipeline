@@ -8,7 +8,7 @@
  */
 
 import {
-  extractVideoId,
+  canonicalTikTokUrl, extractVideoId,
   isSubmittableTikTokUrl,
 } from '../lib/pipeline/tiktok';
 import { QUEUE_CONFIG, isTerminalStatus } from '../lib/config/pipeline';
@@ -103,6 +103,8 @@ const tracked = extractVideoId(
   'https://www.tiktok.com/@chef/video/7234567890123456789?is_from_webapp=1'
 );
 check('tracking params do not break dedupe', plain === tracked && plain !== null, true);
+
+check('tracked video URLs share one queue URL', canonicalTikTokUrl('https://m.tiktok.com/@chef/video/7234567890123456789?share=1#fragment'), 'https://www.tiktok.com/@chef/video/7234567890123456789');
 
 // ── Lifecycle ────────────────────────────────────────────
 check('completed is terminal', isTerminalStatus('completed'), true);

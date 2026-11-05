@@ -51,6 +51,8 @@ export async function DELETE(request: NextRequest) {
     // Count before deleting so the response can state what actually went,
     // which is what makes this verifiable rather than merely plausible.
     for (const table of [
+      'saves',
+      'itineraries',
       'restaurant_saves',
       'restaurant_feedback',
       'engagement_events',
@@ -61,6 +63,7 @@ export async function DELETE(request: NextRequest) {
         .eq('user_id', user.id)
         .select('id');
 
+      if (error && ['saves', 'itineraries'].includes(table) && ['42P01', 'PGRST205'].includes(error.code)) continue;
       if (error) {
         // engagement_events is the one that can be large; a failure here
         // must not leave the auth user deleted with rows still pointing at
@@ -103,7 +106,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    console.log(`[Account] deleted ${user.id}:`, JSON.stringify(deleted));
+    console.log(`[Account] deletion completed:`, JSON.stringify(deleted));
 
     return ok({
       ok: true,

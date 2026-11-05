@@ -27,6 +27,15 @@ export function extractVideoId(url: string): string | null {
   return null;
 }
 
+/** Remove tracking parameters so the same share link has one queue identity. */
+export function canonicalTikTokUrl(value: string): string {
+  const url = new URL(value.trim());
+  url.search = '';
+  url.hash = '';
+  if (/(^|\.)tiktok\.com$/.test(url.hostname) && /\/@[^/]+\/video\/\d+/.test(url.pathname)) url.hostname = 'www.tiktok.com';
+  return url.toString().replace(/\/$/, '');
+}
+
 /**
  * Is this a URL we are willing to accept from a user?
  *

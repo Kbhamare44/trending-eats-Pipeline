@@ -5,18 +5,24 @@ import { TikTokData, ExtractionResult, PlaceResult } from '@/lib/types';
 
 export async function createRawSubmission(
   tiktokUrl: string,
-  submittedBy: string | null
+  submittedBy: string | null,
+  videoId?: string | null
 ): Promise<string> {
   const { data, error } = await supabase
     .from('raw_submissions')
     .insert({
       tiktok_url: tiktokUrl,
+      tiktok_video_id: videoId && /^\d+$/.test(videoId) ? videoId : null,
       submitted_by: submittedBy,
       status: 'pending',
     })
     .select('id')
     .single();
 
+  if (error?.code === '23505') {
+    const existing = await findOpenSubmissionByUrl(tiktokUrl, videoId);
+    if (existing) return existing.id;
+  }
   if (error) throw new Error(`Failed to create submission: ${error.message}`);
   return data.id;
 }
@@ -241,6 +247,10 @@ export async function createReview(
     .select('id')
     .single();
 
+  if (error?.code === '23505') {
+    const { data: existing } = await supabase.from('reviews').select('id').eq('tiktok_video_id', tiktokData.videoId).limit(1).maybeSingle();
+    if (existing) return existing.id;
+  }
   if (error) throw new Error(`Failed to create review: ${error.message}`);
   return data.id;
 }
@@ -347,7 +357,11 @@ export async function getSubmissionOutcome(
     .eq('submission_id', submissionId)
     .maybeSingle();
 
-  if (error || !data?.restaurant_id) return null;
+  if (error) throw new Error('Could not verify an existing review');
+  if (!data?.restaurant_id) {
+    const record = await getSubmissionById(submissionId);
+    return record?.tiktok_video_id ? findReviewByVideoId(record.tiktok_video_id) : null;
+  }
 
   const joined = (data as any).restaurants;
   const name = Array.isArray(joined) ? joined[0]?.name : joined?.name;
@@ -369,7 +383,8 @@ export async function findReviewByVideoId(
     .limit(1)
     .maybeSingle();
 
-  if (error || !data?.restaurant_id) return null;
+  if (error) throw new Error('Could not verify an existing review');
+  if (!data?.restaurant_id) return null;
 
   const joined = (data as any).restaurants;
   const name = Array.isArray(joined) ? joined[0]?.name : joined?.name;
@@ -381,20 +396,15 @@ export async function findReviewByVideoId(
  * the first submission's id rather than queueing the same work twice.
  */
 export async function findOpenSubmissionByUrl(
-  tiktokUrl: string
+  tiktokUrl: string,
+  videoId?: string | null
 ): Promise<SubmissionRecord | null> {
-  const { data, error } = await supabase
-    .from('raw_submissions')
-    .select(
-      'id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at'
-    )
-    .eq('tiktok_url', tiktokUrl)
-    .in('status', ['pending', 'processing'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) return null;
+  let query = supabase.from('raw_submissions')
+    .select('id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at')
+    .in('status', ['pending', 'processing']);
+  query = videoId && /^\d+$/.test(videoId) ? query.eq('tiktok_video_id', videoId) : query.eq('tiktok_url', tiktokUrl);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error('Could not check existing submissions');
   return (data as SubmissionRecord | null) ?? null;
 }
 

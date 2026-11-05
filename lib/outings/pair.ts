@@ -25,6 +25,7 @@
  * One request therefore bills at most OUTING_MAX_PAIRINGS elements.
  */
 
+import { activityQuality, activityScore, activityReason } from '@/lib/outings/quality';
 import { supabase } from '@/lib/supabase/client';
 import { OUTING_CONFIG } from '@/lib/config/outings';
 import { findNearbyActivities, type NearbyActivity } from '@/lib/google/nearby';
@@ -66,6 +67,7 @@ export interface OutingPairing {
   };
   /** Render-ready, and never claims momentum we cannot support. */
   headline: string;
+  reason: string;
 }
 
 export interface PairingResult {
@@ -207,9 +209,11 @@ export async function buildPairings(options: {
   let searchAttempts = 0;
   let searchFailures = 0;
   let firstError: string | null = null;
+  const usedActivities = new Set<string>();
+  const usedCategories = new Map<string, number>();
 
   for (const restaurant of candidates) {
-    if (pairings.length >= limit) break;
+    if (pairings.length >= limit || routesCalled >= limit) break;
 
     let nearby: NearbyActivity[] = [];
     searchAttempts++;
@@ -233,8 +237,8 @@ export async function buildPairings(options: {
           { latitude: activity.latitude, longitude: activity.longitude }
         ),
       }))
-      .filter((c) => c.metres <= OUTING_CONFIG.maxStraightLineM)
-      .sort((a, b) => a.metres - b.metres);
+      .filter((c) => c.metres <= OUTING_CONFIG.maxStraightLineM && !usedActivities.has(c.activity.placeId) && (usedCategories.get(c.activity.category) ?? 0) < 2 && activityQuality(c.activity))
+      .sort((a, b) => activityScore(b.activity, b.metres, usedCategories.has(b.activity.category)) - activityScore(a.activity, a.metres, usedCategories.has(a.activity.category)) || a.metres - b.metres);
 
     const best = scored[0];
     if (!best) continue;
@@ -244,9 +248,12 @@ export async function buildPairings(options: {
       { latitude: restaurant.latitude, longitude: restaurant.longitude },
       { latitude: best.activity.latitude, longitude: best.activity.longitude }
     );
-    if (measured) routesCalled++;
+    if (OUTING_CONFIG.useRoutesApi && process.env.GOOGLE_PLACES_API_KEY) routesCalled++;
 
+    if (measured && measured.minutes > 25) continue; // a large detour is not a walkable pairing
     const activityId = await upsertActivity(best.activity);
+    usedActivities.add(best.activity.placeId);
+    usedCategories.set(best.activity.category, (usedCategories.get(best.activity.category) ?? 0) + 1);
 
     pairings.push({
       restaurant: {
@@ -277,6 +284,7 @@ export async function buildPairings(options: {
         metres: Math.round(best.metres),
         measured: false,
       },
+      reason: activityReason(best.activity, measured?.minutes ?? estimateWalkMinutes(best.metres, OUTING_CONFIG.walkMetresPerMinute), Boolean(measured)),
       headline: headlineFor(
         restaurant.name,
         best.activity.name,
@@ -294,7 +302,7 @@ export async function buildPairings(options: {
   if (searchFailed) {
     resolvedNote = 'We could not reach the activity search just now. Try again shortly.';
   } else if (pairings.length === 0) {
-    resolvedNote = 'Nothing to pair yet — we need restaurants with something walkable nearby.';
+    resolvedNote = 'No suitable recreational activity was found within walking distance of these restaurants.';
   }
 
   return {

@@ -25,7 +25,7 @@ function loadSource(file: string, dependencies: Record<string, unknown>, globals
 const speech = 'I went to Messi Shawarma in Brampton and ordered chicken shawarma.';
 const typedCaption = 'Visiting Messi Shawarma in Brampton.';
 
-function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null) {
+function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null, savedVideo: any = null) {
   const calls: { name: string; args: any[] }[] = [];
   const record = (name: string, result?: unknown) => async (...args: any[]) => {
     calls.push({ name, args });
@@ -53,6 +53,7 @@ function processorFixture(caption: string, transcriptStatus: string, transcriptT
     },
     '@/lib/supabase/queries': {
       updateSubmissionWithTikTokData: record('saveMetadata'),
+      findReviewByVideoId: record('existingVideo', savedVideo),
       updateSubmissionStatus: record('status'),
       findRestaurantByPlaceId: record('findRestaurant', null),
       createRestaurant: record('createRestaurant', 'restaurant-1'),
@@ -78,6 +79,15 @@ async function check(label: string, body: () => Promise<void>) {
 }
 
 async function run() {
+  await check('retry after a saved review reuses it before any provider call', async () => {
+    const fixture = processorFixture('', 'not_attempted', null, { restaurantId: 'saved-restaurant', restaurantName: 'Saved business' });
+    const result = await fixture.run();
+    assert.equal(result.success, true);
+    assert.equal(result.restaurantId, 'saved-restaurant');
+    assert.ok(!fixture.calls.some(c => ['transcript', 'classify', 'extract', 'places', 'createReview'].includes(c.name)));
+    assert.equal(fixture.calls.filter(c => c.name === 'status').at(-1)?.args[1], 'completed');
+  });
+
   await check('missing API caption uses spoken transcript and saves a review', async () => {
     const fixture = processorFixture('', 'ok', speech);
     const result = await fixture.run();

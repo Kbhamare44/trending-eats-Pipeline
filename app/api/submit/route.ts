@@ -28,7 +28,7 @@ import {
   countRecentSubmissions,
 } from '@/lib/supabase/queries';
 import { LIMITS, tooManyRequests } from '@/lib/http/ratelimit';
-import { extractVideoId, isSubmittableTikTokUrl } from '@/lib/pipeline/tiktok';
+import { canonicalTikTokUrl, extractVideoId, isSubmittableTikTokUrl } from '@/lib/pipeline/tiktok';
 import { drainSubmission } from '@/lib/pipeline/worker';
 import { getAuthedUser, isAuthorizedCron } from '@/lib/auth/verify';
 import { ok, badRequest, serverError } from '@/lib/http/respond';
@@ -54,13 +54,15 @@ export async function POST(request: NextRequest) {
       return badRequest('tiktokUrl is required');
     }
 
-    const url = tiktokUrl.trim();
+    let url = tiktokUrl.trim();
 
     // Parse the host properly rather than substring-matching "tiktok.com",
     // which would also accept something like https://tiktok.com.evil.test/x.
     if (!isSubmittableTikTokUrl(url)) {
       return badRequest('That does not look like a TikTok link');
     }
+
+    url = canonicalTikTokUrl(url);
 
     // ── Dedupe before spending anything ────────────────
     // A link that already produced a review needs no pipeline run at all.
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     // Double-tapping Submit should return the first submission, not queue the
     // same work twice.
-    const inFlight = await findOpenSubmissionByUrl(url);
+    const inFlight = await findOpenSubmissionByUrl(url, videoId);
     if (inFlight) {
       return ok({
         submissionId: inFlight.id,
@@ -128,7 +130,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const submissionId = await createRawSubmission(url, user?.id ?? null);
+    const submissionId = await createRawSubmission(url, user?.id ?? null, videoId);
 
     // Fast path: start draining as soon as the response is on the wire. If
     // this invocation dies first, the row is simply left `pending` and the

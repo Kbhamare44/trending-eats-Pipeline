@@ -5,6 +5,7 @@ import { extractRestaurantData } from '@/lib/gemini/extract';
 import { findRestaurant } from '@/lib/google/places';
 import {
   updateSubmissionWithTikTokData,
+  findReviewByVideoId,
   updateSubmissionStatus,
   findRestaurantByPlaceId,
   createRestaurant,
@@ -42,6 +43,12 @@ export async function processSubmission(
     console.log(`[Pipeline] Fetching TikTok data...`);
     const tiktokData = await fetchTikTokData(tiktokUrl);
     await updateSubmissionWithTikTokData(submissionId, tiktokData);
+
+    const savedVideo = tiktokData.videoId ? await findReviewByVideoId(tiktokData.videoId) : null;
+    if (savedVideo) {
+      await updateSubmissionStatus(submissionId, 'completed');
+      return { success: true, restaurantId: savedVideo.restaurantId, restaurantName: savedVideo.restaurantName, isExistingRestaurant: true };
+    }
 
     // ── Step 1b: Transcript ────────────────────────────
     // Runs here, in the background worker, never in the request path.

@@ -13,6 +13,7 @@
  * pattern restaurants use.
  */
 
+import { activityQuality } from '@/lib/outings/quality';
 import { OUTING_CONFIG } from '@/lib/config/outings';
 
 const LEGACY_NEARBY = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
@@ -32,6 +33,9 @@ export interface NearbyActivity {
   placeId: string;
   name: string;
   category: string;
+  types: string[];
+  primaryType: string | null;
+  businessStatus: string | null;
   address: string | null;
   latitude: number;
   longitude: number;
@@ -72,7 +76,9 @@ async function searchLegacy(
   const response = await fetch(`${LEGACY_NEARBY}?${params.toString()}`, {
     signal: AbortSignal.timeout(10_000),
   });
+  if (!response.ok) throw new Error(`Places nearby search HTTP ${response.status}`);
   const body: any = await response.json().catch(() => null);
+  if (!body?.status) throw new Error('Places nearby search returned an invalid response');
 
   // Throw on a non-OK status rather than returning nothing. Reporting
   // REQUEST_DENIED as "no activities nearby" is the same mistake the
@@ -92,6 +98,9 @@ async function searchLegacy(
       placeId: r.place_id,
       name: r.name,
       category,
+      types: Array.isArray(r.types) ? r.types : [],
+      primaryType: null,
+      businessStatus: r.business_status ?? null,
       address: r.vicinity ?? null,
       latitude: r.geometry?.location?.lat,
       longitude: r.geometry?.location?.lng,
@@ -119,6 +128,8 @@ async function searchNew(
       // for. Only what an activity row and a pairing actually need.
       'X-Goog-FieldMask': [
         'places.id',
+        'places.types',
+        'places.primaryType',
         'places.displayName',
         'places.formattedAddress',
         'places.location',
@@ -158,6 +169,9 @@ async function searchNew(
       placeId: p.id,
       name: p.displayName?.text ?? '',
       category,
+      types: Array.isArray(p.types) ? p.types : [],
+      primaryType: p.primaryType ?? null,
+      businessStatus: p.businessStatus ?? null,
       address: p.formattedAddress ?? null,
       latitude: p.location?.latitude,
       longitude: p.location?.longitude,
@@ -197,21 +211,9 @@ export async function findNearbyActivities(
     for (const activity of batch) {
       if (seen.has(activity.placeId)) continue;
 
-      // Quality gate before anything is stored or ranked. A trending
-      // restaurant paired with a 2-star bar makes the app look careless, and
-      // the thing people blame is the app.
-      if (
-        activity.googleRating != null &&
-        activity.googleRating < OUTING_CONFIG.minActivityRating
-      ) {
-        continue;
-      }
-      if (
-        activity.googleRatingCount != null &&
-        activity.googleRatingCount < OUTING_CONFIG.minActivityRatingCount
-      ) {
-        continue;
-      }
+      const quality = activityQuality(activity);
+      if (!quality) continue;
+      activity.category = quality.category;
 
       seen.add(activity.placeId);
       found.push(activity);
