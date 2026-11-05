@@ -43,25 +43,10 @@ export async function processSubmission(
     const tiktokData = await fetchTikTokData(tiktokUrl);
     await updateSubmissionWithTikTokData(submissionId, tiktokData);
 
-    if (!tiktokData.caption) {
-      await updateSubmissionStatus(submissionId, 'rejected', {
-        rejectionReason: 'No caption available to process',
-      });
-      return { success: false, rejectionReason: 'No caption' };
-    }
-
     // ── Step 1b: Transcript ────────────────────────────
     // Runs here, in the background worker, never in the request path.
-    //
-    // NOT YET PASSED TO THE PROMPTS. Combining caption and transcript changes
-    // what Gemini is asked, and a prompt change is reviewed before it ships,
-    // so this pass fetches and stores transcripts only. Storing them first is
-    // also what makes the comparison possible: scripts/measure-transcript.ts
-    // replays stored transcripts against caption-only extraction to find out
-    // whether the transcript is worth its cost per submission.
-    //
-    // A transcript never fails a submission — fetchTranscript resolves to a
-    // status instead of throwing, and nothing below branches on it.
+    // oEmbed can return an embed while omitting a caption visible in TikTok.
+    // Try the spoken text before deciding whether we have usable content.
     const transcript = await fetchTranscript(tiktokUrl, {
       videoId: tiktokData.videoId || null,
       captionLength: tiktokData.caption.length,
@@ -76,11 +61,22 @@ export async function processSubmission(
       );
     }
 
+    if (!tiktokData.caption.trim() && !transcript.text?.trim()) {
+      if (transcript.status === 'failed') {
+        // Provider failure is retryable, not evidence about the video.
+        throw new Error(`Content retrieval failed: ${transcript.detail ?? 'transcript provider failed'}`);
+      }
+      const rejectionReason = 'Could not retrieve a caption or spoken transcript for this video';
+      await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason });
+      return { success: false, rejectionReason };
+    }
+
     // ── Step 2: Classify content ───────────────────────
     console.log(`[Pipeline] Classifying content...`);
     const classification = await classifyContent(
       tiktokData.caption,
-      tiktokData.creatorUsername
+      tiktokData.creatorUsername,
+      transcript.text ?? undefined
     );
 
     if (!classification.isRestaurantReview || classification.confidence < 0.4) {
@@ -97,12 +93,14 @@ export async function processSubmission(
     console.log(`[Pipeline] Extracting restaurant data...`);
     const extraction = await extractRestaurantData(
       tiktokData.caption,
-      tiktokData.creatorUsername
+      tiktokData.creatorUsername,
+      undefined,
+      transcript.text ?? undefined
     );
 
     if (!extraction.restaurantName) {
       await updateSubmissionStatus(submissionId, 'rejected', {
-        rejectionReason: 'Could not identify restaurant name from caption',
+        rejectionReason: 'Could not identify restaurant name from the retrieved caption or transcript',
       });
       return { success: false, rejectionReason: 'No restaurant name found' };
     }

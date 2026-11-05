@@ -1,9 +1,9 @@
 /**
  * Transcripts for user-submitted TikTok URLs, via Supadata.
  *
- * WHY: Gemini currently sees only the caption, which is often a few words and
- * some hashtags. The creator describing the food out loud is far richer for
- * extracting dish names.
+ * WHY: caption metadata may be incomplete, and spoken words often contain
+ * restaurant and dish details missing from the caption. Classification and
+ * extraction use whichever text sources are available.
  *
  * ── COMPLIANCE BOUNDARY, since this is the part most easily mistaken for
  * something it is not ──
@@ -19,10 +19,10 @@
  *
  * ── FAILURE POSTURE ──
  *
- * A transcript is an enhancement, never a requirement. Every path here
- * resolves to a status rather than throwing, and the caller carries on with
- * the caption. A submission must never fail because a transcript did not
- * arrive.
+ * Every path here resolves to a status rather than throwing. A usable
+ * caption is sufficient when the transcript is unavailable; when the caption
+ * was not retrieved, the caller distinguishes provider failure from a
+ * successful response without spoken content.
  */
 
 import { supabase } from '@/lib/supabase/client';

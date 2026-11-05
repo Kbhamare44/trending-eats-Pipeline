@@ -36,8 +36,10 @@ keep the returned text. That is the whole of it:
   than re-fetched, so a video submitted twice is fetched once.
 - `transcript_status` records `ok`, `unavailable`, `failed` or `not_attempted`.
   A video that is private, restricted or silent comes back `unavailable` and
-  the pipeline continues on the caption alone. A transcript never decides
-  whether a submission succeeds.
+  the pipeline continues on the caption alone when a caption was retrieved.
+  Either a retrieved caption or spoken transcript can supply extraction. If
+  neither is retrieved, we report a retrieval failure without claiming the
+  video has no caption. Provider failures remain retryable.
 
 Commercial-use rights for the transcript service were confirmed by the owner
 before this was integrated, which is the condition the v2 strategy sets for

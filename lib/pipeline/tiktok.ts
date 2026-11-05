@@ -114,13 +114,17 @@ export async function fetchTikTokData(url: string): Promise<TikTokData> {
   }
 
   const data = response.data;
+  if (!data || data.type !== 'video' || typeof data.html !== 'string' || !data.html.trim()) {
+    throw new Error('TikTok oEmbed returned no usable video metadata');
+  }
   const videoId = extractVideoId(fullUrl) || data.video_id || '';
 
   return {
     videoId,
     url: fullUrl,
-    caption: data.title || '',
-    creatorUsername: data.author_name || '',
+    // Missing title means metadata was omitted, not that the video lacks a caption.
+    caption: typeof data.title === 'string' ? data.title.trim() : '',
+    creatorUsername: data.author_name || new URL(fullUrl).pathname.match(/^\/@([^/]+)\//)?.[1] || '',
     thumbnailUrl: data.thumbnail_url || '',
     embedHtml: data.html || '',
     likes: 0,
