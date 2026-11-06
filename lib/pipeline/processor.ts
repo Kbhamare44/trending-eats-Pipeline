@@ -15,6 +15,13 @@ import {
 } from '@/lib/supabase/queries';
 import { isGta } from '@/lib/geo/gta';
 
+/**
+ * Marks a rejection the person can resolve by answering, rather than a dead
+ * end. Stored in the reason because adding a submission status would mean a
+ * migration for one boolean.
+ */
+export const NEEDS_LOCATION = '[needs-location] ';
+
 export interface ProcessingResult {
   success: boolean;
   restaurantId?: string;
@@ -24,6 +31,8 @@ export interface ProcessingResult {
   error?: string;
   /** False when the match is outside the Toronto/GTA launch market. */
   inCoverageArea?: boolean;
+  /** True when we need the person to name a city before we can proceed. */
+  needsLocation?: boolean;
   /** Set when the restaurant was already in our database. */
   isExistingRestaurant?: boolean;
 }
@@ -138,25 +147,26 @@ export async function processSubmission(
     // A chain with several branches, and the caption never said which city.
     // `city` above was our Toronto default, not evidence, so results[0] is a
     // guess at an address. Say we are unsure instead of inventing a branch.
-    // Two ways the branch can be a guess rather than a match:
-    //   - another result carries the same name (a chain), or
-    //   - we searched our Toronto default and Google answered with a
-    //     different city, which means the city hint did nothing.
-    // "Messi Shawarma Toronto" returns a Brampton address: one result, so
-    // not ambiguous by name, but still not evidence of which branch the
-    // video meant.
-    const cityWasGuessed = !extraction.city;
-    const cityDisagrees =
-      cityWasGuessed &&
-      Boolean(place.city) &&
-      place.city.toLowerCase() !== city.toLowerCase();
-
-    if ((place.ambiguous || cityDisagrees) && cityWasGuessed) {
+    // ASK vs REJECT.
+    //
+    // A missing city in the caption is not evidence of anything. The earlier
+    // version compared the result's city against our Toronto DEFAULT and
+    // called a mismatch a conflict — which would have rejected Messi
+    // Shawarma, where Google knows exactly one business by that name, at a
+    // Brampton address. A default we invented cannot contradict a real
+    // answer.
+    //
+    // So we only ask the person to choose when the name genuinely does not
+    // identify one place: several results share it and the caption never
+    // said which city. A single confident result is the best answer
+    // available, wherever it is.
+    if (place.ambiguous && !extraction.city) {
       const reason =
-        `"${extraction.restaurantName}" has more than one location and the video ` +
-        `does not say which. Add the city or neighbourhood and try again.`;
+        `${NEEDS_LOCATION}"${extraction.restaurantName}" matches more than one ` +
+        `location and the video does not say which. Reply with the city or ` +
+        `neighbourhood and we will add it.`;
       await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason: reason });
-      return { success: false, rejectionReason: reason };
+      return { success: false, rejectionReason: reason, needsLocation: true };
     }
 
     // ── Step 5: Get or create restaurant ──────────────
