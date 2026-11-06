@@ -30,10 +30,14 @@ async function main() {
   const results = await Promise.all([q.createRawSubmission('https://www.tiktok.com/@test/video/123', null, '123'), q.createRawSubmission('https://www.tiktok.com/@test/video/123', null, '123')]);
   assert.equal(rows.length, 1); assert.equal(results[0], results[1]);
   console.log('PASS concurrent queue insert conflict returns the same submission ID');
+  const hint={restaurantName:'Yaseen Shawarma',city:'Mississauga',placeId:'selected-branch'};
+  await q.createRawSubmission('https://www.tiktok.com/@test/video/456',null,'456',hint);
+  assert.deepEqual(rows[1].user_hint,hint);
+  console.log('PASS restaurant correction is saved with the queue row');
   const reviewQueries = queries({ from() { const chain: any = { insert() { return chain; }, select() { return chain; }, eq() { return chain; }, limit() { return chain; }, single: async () => ({ error: { code: '23505' } }), maybeSingle: async () => ({ data: { id: 'existing-review' } }) }; return chain; } });
   const id = await reviewQueries.createReview('restaurant', 'submission', { videoId: '123' }, { isSponsored: false });
   assert.equal(id, 'existing-review');
   console.log('PASS unique-review conflict reuses saved review instead of creating another');
-  console.log('Idempotency checks: 2 passed (database uniqueness migration is required)');
+  console.log('Idempotency checks: 3 passed (database uniqueness migration is required)');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

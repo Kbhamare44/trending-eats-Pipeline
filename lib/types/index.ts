@@ -10,6 +10,25 @@ export interface TikTokData {
   views: number;
 }
 
+export interface SubmissionHint {
+  restaurantName?: string | null;
+  city?: string | null;
+  placeId?: string | null;
+}
+
+export interface PlaceOption {
+  placeId: string;
+  name: string;
+  address: string;
+  city: string;
+}
+
+export interface SubmissionResolution {
+  restaurantName: string | null;
+  nameSource?: { source: string; sourcePhrase: string };
+  candidates?: PlaceOption[];
+}
+
 // AI classification result
 export interface ClassificationResult {
   isRestaurantReview: boolean;
@@ -21,6 +40,7 @@ export interface ClassificationResult {
 // AI extraction result
 export interface ExtractionResult {
   restaurantName: string | null;
+  restaurantNameEvidence?: { source: 'caption' | 'transcript'; sourcePhrase: string } | null;
   city: string | null;
   cuisine: string | null;
   dishesMentioned: string[];
@@ -65,6 +85,8 @@ export interface PlaceResult {
    * first — a different address from the one in the video.
    */
   ambiguous?: boolean;
+  locationVerified?: boolean;
+  candidates?: PlaceOption[];
 }
 
 // Final processed submission

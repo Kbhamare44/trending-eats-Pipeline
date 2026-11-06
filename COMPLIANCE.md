@@ -17,6 +17,7 @@ person pastes a TikTok link
   -> row in raw_submissions                (status: pending)
   -> background worker picks it up         (never the request path)
   -> TikTok oEmbed                         (public endpoint: metadata + embed HTML)
+  -> optional Supadata caption metadata    (only when oEmbed omits the caption)
   -> Supadata transcript                   (TEXT of the submitted URL; see below)
   -> Gemini classify + extract             (reads caption text and transcript text)
   -> Google Places verification            (is this a real, operating business?)
@@ -29,8 +30,8 @@ We send the URL **the user submitted** to Supadata's transcript endpoint and
 keep the returned text. That is the whole of it:
 
 - No video or audio file is downloaded, stored, re-hosted or served by us.
-- Only the transcript endpoint is called. No creator endpoint, no search
-  endpoint, no listing endpoint.
+- The transcript endpoint and optional metadata endpoint are used. No creator,
+  search or listing endpoint is called.
 - Only URLs a person pasted into the app are ever sent. Nothing is discovered.
 - A transcript we already hold for the same `tiktok_video_id` is reused rather
   than re-fetched, so a video submitted twice is fetched once.
@@ -47,6 +48,23 @@ any third-party transcript provider.
 
 If a future change makes this module fetch media rather than text, or fetch a
 URL no user submitted, it has left this boundary.
+
+### Missing caption metadata
+
+An empty oEmbed title means that endpoint omitted the caption; it does not prove
+the video has no visible caption. `CAPTION_METADATA_ENABLED=true` permits one
+Supadata `/v1/metadata` request for an uncached, user-submitted video whose
+oEmbed caption is empty. It costs one metadata credit. With the owner's approval,
+Production defaults on when the flag is unset; local and Preview default off.
+An explicit `CAPTION_METADATA_ENABLED=false` disables new metadata requests.
+Previously retrieved captions are reusable even while the flag is off.
+
+Only the response's `description` for the matching TikTok video ID is treated
+as caption text. A title is not substituted, and engagement counts are ignored.
+The source and retrieval status are stored separately from the caption. A
+recorded pending, failed or unavailable attempt is not automatically charged
+again on a queue retry; an operator must explicitly clear that attempt to
+authorize another metadata request. No media is downloaded or re-hosted.
 
 `GET /api/cron` drains the `raw_submissions` queue on a schedule. It is worth
 being precise about this, because a scheduled job that touches TikTok *looks*
@@ -124,9 +142,10 @@ These are real restaurants, and a confident-looking number can affect them.
 - Feedback is displayed without usernames attached.
 - `engagement_events` has RLS enabled **with no policies**, so no client-side
   key can read it. Service role only.
-- Account deletion goes through the existing `delete-user` Supabase function;
-  `ON DELETE CASCADE` on `restaurant_saves` and `restaurant_feedback` removes
-  that user's rows with it.
+- Account deletion goes through authenticated `DELETE /api/account`. It clears
+  private saves, feedback, itineraries and activity, anonymises submitted-by
+  links, and deletes the auth account last. A failed step is reported as a
+  failure; public restaurant and third-party TikTok review records remain.
 
 ## Writes are authenticated
 

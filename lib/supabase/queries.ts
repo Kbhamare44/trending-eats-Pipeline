@@ -1,12 +1,13 @@
 import { supabase } from './client';
-import { TikTokData, ExtractionResult, PlaceResult } from '@/lib/types';
+import { TikTokData, ExtractionResult, PlaceResult, SubmissionHint, SubmissionResolution } from '@/lib/types';
 
 // ── Raw Submissions ──────────────────────────────────────
 
 export async function createRawSubmission(
   tiktokUrl: string,
   submittedBy: string | null,
-  videoId?: string | null
+  videoId?: string | null,
+  hint?: SubmissionHint
 ): Promise<string> {
   const { data, error } = await supabase
     .from('raw_submissions')
@@ -15,6 +16,7 @@ export async function createRawSubmission(
       tiktok_video_id: videoId && /^\d+$/.test(videoId) ? videoId : null,
       submitted_by: submittedBy,
       status: 'pending',
+      user_hint: hint && Object.values(hint).some(Boolean) ? hint : null,
     })
     .select('id')
     .single();
@@ -35,7 +37,13 @@ export async function updateSubmissionWithTikTokData(
     .from('raw_submissions')
     .update({
       tiktok_video_id: data.videoId,
-      caption: data.caption,
+      // An omitted oEmbed title must not erase a caption already retrieved.
+      ...(data.caption.trim() ? {
+        caption: data.caption,
+        caption_source: 'tiktok-oembed',
+        caption_fetch_status: 'ok',
+        caption_fetched_at: new Date().toISOString(),
+      } : {}),
       creator_username: data.creatorUsername,
       thumbnail_url: data.thumbnailUrl,
       embed_html: data.embedHtml,
@@ -50,7 +58,7 @@ export async function updateSubmissionWithTikTokData(
 export async function updateSubmissionStatus(
   submissionId: string,
   status: string,
-  extra?: { errorMessage?: string; rejectionReason?: string }
+  extra?: { errorMessage?: string; rejectionReason?: string; resolution?: SubmissionResolution }
 ): Promise<void> {
   const { error } = await supabase
     .from('raw_submissions')
@@ -59,6 +67,7 @@ export async function updateSubmissionStatus(
       processed_at: new Date().toISOString(),
       error_message: extra?.errorMessage || null,
       rejection_reason: extra?.rejectionReason || null,
+      ...(extra?.resolution ? { resolution: extra.resolution } : {}),
     })
     .eq('id', submissionId);
 
@@ -327,6 +336,8 @@ export interface SubmissionRecord {
   error_message: string | null;
   created_at: string;
   processed_at: string | null;
+  user_hint?: SubmissionHint | null;
+  resolution?: SubmissionResolution | null;
 }
 
 export async function getSubmissionById(
@@ -335,7 +346,7 @@ export async function getSubmissionById(
   const { data, error } = await supabase
     .from('raw_submissions')
     .select(
-      'id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at'
+      'id, status, tiktok_url, tiktok_video_id, attempts, rejection_reason, error_message, created_at, processed_at, user_hint, resolution'
     )
     .eq('id', submissionId)
     .maybeSingle();

@@ -12,5 +12,7 @@ export async function GET() {
     branch: process.env.VERCEL_GIT_COMMIT_REF ?? 'local',
     deployedAt: process.env.VERCEL_DEPLOYMENT_ID ? undefined : 'local dev',
     env: process.env.VERCEL_ENV ?? 'development',
+    captionMetadataEnabled: (process.env.CAPTION_METADATA_ENABLED ?? (process.env.VERCEL_ENV === 'production' ? 'true' : 'false')) === 'true'
+      && Boolean(process.env.SUPADATA_API_KEY),
   });
 }

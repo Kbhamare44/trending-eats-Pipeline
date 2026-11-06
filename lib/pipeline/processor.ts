@@ -1,6 +1,8 @@
 import { fetchTikTokData } from './tiktok';
 import { fetchTranscript, saveTranscript } from './transcript';
-import { extractNameCandidates } from './nameCandidates';
+import { fetchCaption } from './caption';
+import { extractNameCandidates, cityClue } from './nameCandidates';
+import type { SubmissionHint, SubmissionResolution } from '@/lib/types';
 import { classifyContent } from '@/lib/gemini/classify';
 import { extractRestaurantData } from '@/lib/gemini/extract';
 import { findRestaurant } from '@/lib/google/places';
@@ -26,9 +28,8 @@ export const NEEDS_LOCATION = '[needs-location] ';
 /**
  * Marks a rejection the person can fix by naming the place.
  *
- * Needed because TikTok stopped returning captions, so a video whose
- * transcript never says the restaurant's name has nothing for us to extract
- * — which is a question, not a dead end.
+ * Used when retrieved inputs do not identify the subject. Missing API
+ * metadata is not evidence that the video has no visible caption.
  */
 export const NEEDS_NAME = '[needs-name] ';
 
@@ -52,12 +53,8 @@ export interface ProcessingResult {
 export async function processSubmission(
   submissionId: string,
   tiktokUrl: string,
-  /**
-   * What the person told us when we had to ask. In memory only: there is no
-   * column for it, so a retry on a later invocation loses it and asks again.
-   * shortcut: not persisted, add raw_submissions.user_hint if retries need it.
-   */
-  hint?: { restaurantName?: string | null; city?: string | null }
+  /** Loaded by the worker from the queue row, including after a restart. */
+  hint?: SubmissionHint
 ): Promise<ProcessingResult> {
   console.log(`[Pipeline] Starting: ${submissionId}`);
 
@@ -70,12 +67,6 @@ export async function processSubmission(
     console.log(`[Pipeline] Fetching TikTok data...`);
     const tiktokData = await fetchTikTokData(tiktokUrl);
     await updateSubmissionWithTikTokData(submissionId, tiktokData);
-
-    const savedVideo = tiktokData.videoId ? await findReviewByVideoId(tiktokData.videoId) : null;
-    if (savedVideo) {
-      await updateSubmissionStatus(submissionId, 'completed');
-      return { success: true, restaurantId: savedVideo.restaurantId, restaurantName: savedVideo.restaurantName, isExistingRestaurant: true };
-    }
 
     // Dedupe again, now that we know the REAL video id.
     //
@@ -99,6 +90,11 @@ export async function processSubmission(
           inCoverageArea: true,
         };
       }
+    }
+
+    if (!tiktokData.caption.trim()) {
+      const caption = await fetchCaption(submissionId, tiktokData.videoId, tiktokData.url);
+      if (caption.text) tiktokData.caption = caption.text;
     }
 
     // ── Step 1b: Transcript ────────────────────────────
@@ -156,36 +152,27 @@ export async function processSubmission(
       transcript.text ?? undefined
     );
 
-    // A name the person supplied outranks extraction: they watched the video.
+    const captionCandidates = extractNameCandidates(tiktokData.caption, 'caption');
+    const speechCandidates = extractNameCandidates(transcript.text ?? '', 'transcript');
+    const evidence = captionCandidates[0] ?? extraction.restaurantNameEvidence ?? speechCandidates[0];
+    const resolution: SubmissionResolution = {
+      restaurantName: extraction.restaurantName,
+      ...(evidence ? { nameSource: { source: evidence.source, sourcePhrase: evidence.sourcePhrase } } : {}),
+    };
+    // Keep a usable caption name even if the speech/model names a comparison.
     if (hint?.restaurantName) {
       extraction.restaurantName = hint.restaurantName;
-      if (hint.city) extraction.city = hint.city;
-    }
-
-    // Fallback: the model found no name. Captions are gone from TikTok's
-    // oEmbed, so this is now common, and the remaining text is a fragment or
-    // a mangled transcript. A candidate here is a SUGGESTION — it still has
-    // to clear Google Places, and an unverifiable one becomes a question
-    // rather than a stored address.
-    if (!extraction.restaurantName) {
-      const candidates = [
-        ...extractNameCandidates(tiktokData.caption ?? '', 'caption'),
-        ...extractNameCandidates(transcript.text ?? '', 'transcript'),
-      ];
-      if (candidates[0]) {
-        console.log(
-          `[Pipeline] no model name; trying candidate "${candidates[0].name}" ` +
-            `from ${candidates[0].source}: "${candidates[0].sourcePhrase}"`
-        );
-        extraction.restaurantName = candidates[0].name;
-      }
-    }
+      resolution.nameSource = {source: 'user', sourcePhrase: hint.restaurantName};
+    } else if (captionCandidates[0]) extraction.restaurantName = captionCandidates[0].name;
+    else if (!extraction.restaurantNameEvidence) extraction.restaurantName = speechCandidates[0]?.name ?? null;
+    resolution.restaurantName = extraction.restaurantName;
 
     if (!extraction.restaurantName) {
       await updateSubmissionStatus(submissionId, 'rejected', {
         rejectionReason:
           NEEDS_NAME +
           'We could not work out which restaurant this is. What is it called?',
+        resolution,
       });
       return {
         success: false,
@@ -204,41 +191,24 @@ export async function processSubmission(
 
     // ── Step 4: Verify with Google Places ─────────────
     console.log(`[Pipeline] Verifying with Google Places...`);
-    // GTA-first: when the caption gives no location, search Toronto. This is
-    // a launch-market assumption, not a fact about the video — if the match
-    // lands outside the GTA we flag it rather than pretend it is local.
-    const city = extraction.city || 'Toronto';
-    const place = await findRestaurant(extraction.restaurantName, city);
+    const clue = cityClue(tiktokData.caption, transcript.text ?? '', extraction.city, resolution.nameSource?.sourcePhrase);
+    const city = hint?.city?.trim() || clue.city;
+    extraction.city = city || null;
+    const place = await findRestaurant(extraction.restaurantName, city, hint?.placeId);
 
     if (!place) {
       await updateSubmissionStatus(submissionId, 'rejected', {
-        rejectionReason: `Restaurant "${extraction.restaurantName}" not found on Google Places`,
+        rejectionReason: `${NEEDS_LOCATION}We detected "${extraction.restaurantName}" but could not verify its location. Check the name and add a city.`,
+        resolution,
       });
-      return { success: false, rejectionReason: 'Restaurant not found on Google Places' };
+      return { success: false, rejectionReason: 'Name detected; location not confirmed', needsLocation: true };
     }
 
-    // A chain with several branches, and the caption never said which city.
-    // `city` above was our Toronto default, not evidence, so results[0] is a
-    // guess at an address. Say we are unsure instead of inventing a branch.
-    // ASK vs REJECT.
-    //
-    // A missing city in the caption is not evidence of anything. The earlier
-    // version compared the result's city against our Toronto DEFAULT and
-    // called a mismatch a conflict — which would have rejected Messi
-    // Shawarma, where Google knows exactly one business by that name, at a
-    // Brampton address. A default we invented cannot contradict a real
-    // answer.
-    //
-    // So we only ask the person to choose when the name genuinely does not
-    // identify one place: several results share it and the caption never
-    // said which city. A single confident result is the best answer
-    // available, wherever it is.
-    if (place.ambiguous && !extraction.city) {
+    if ((!city && !hint?.placeId) || place.locationVerified !== true || place.ambiguous || (clue.conflict && !hint?.city && !hint?.placeId)) {
       const reason =
-        `${NEEDS_LOCATION}"${extraction.restaurantName}" matches more than one ` +
-        `location and the video does not say which. Reply with the city or ` +
-        `neighbourhood and we will add it.`;
-      await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason: reason });
+        `${NEEDS_LOCATION}We detected "${extraction.restaurantName}" but need to confirm its city or branch. Choose a location below, or correct the name and city.`;
+      resolution.candidates = place.candidates ?? [];
+      await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason: reason, resolution });
       return { success: false, rejectionReason: reason, needsLocation: true };
     }
 
@@ -280,7 +250,7 @@ export async function processSubmission(
     // which meant every submission did the dish sync twice.
 
     // ── Mark complete ──────────────────────────────────
-    await updateSubmissionStatus(submissionId, 'completed');
+    await updateSubmissionStatus(submissionId, 'completed', { resolution });
 
     const inCoverageArea = isGta(place.city, place.address);
     if (!inCoverageArea) {

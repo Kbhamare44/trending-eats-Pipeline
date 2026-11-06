@@ -19,7 +19,8 @@
  *
  * ── FAILURE POSTURE ──
  *
- * Every path here resolves to a status rather than throwing. A usable
+ * Provider paths resolve to a status. A failed cache check throws before
+ * any paid request so it cannot spend again on text we may already hold. A usable
  * caption is sufficient when the transcript is unavailable; when the caption
  * was not retrieved, the caller distinguishes provider failure from a
  * successful response without spoken content.
@@ -203,7 +204,8 @@ async function findCachedTranscript(
     .limit(1)
     .maybeSingle();
 
-  if (error || !data?.transcript) return null;
+  if (error) throw new Error('Could not verify the stored transcript cache');
+  if (!data?.transcript) return null;
 
   return {
     status: 'ok',
@@ -216,7 +218,8 @@ async function findCachedTranscript(
 /**
  * Fetch the transcript for a submitted TikTok URL.
  *
- * Never throws. Returns 'not_attempted' when transcripts are switched off or
+ * Provider failures return a status. A cache-read failure throws before billing.
+ * Returns 'not_attempted' when transcripts are switched off or
  * unconfigured, so a caller can tell "we chose not to" from "we tried and
  * could not".
  */

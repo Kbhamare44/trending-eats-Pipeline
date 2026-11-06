@@ -32,6 +32,10 @@ check('hashtag run-together', top('#yasmineshawarma #halal'), 'Yasmine Shawarma'
 check('hashtag with the term first', top('#shawarmapalace is open late'), 'Shawarma Palace');
 check('extra whitespace', top('  yasmine   shawarma  '), 'Yasmine Shawarma');
 check('punctuation', top('yasmine shawarma!!! 10/10'), 'Yasmine Shawarma');
+check('hyphen spacing', top('Yasmine-Shawarma 🔥'), 'Yasmine Shawarma');
+check('hashtag underscore spacing', top('#Yasmine_Shawarma'), 'Yasmine Shawarma');
+check('original punctuation is preserved', extractNameCandidates('#Yasmine_Shawarma','caption')[0]?.sourcePhrase, '#Yasmine_Shawarma');
+check('mixed-language caption', top('جرّبنا Yasmine Shawarma 🔥'), 'Yasmine Shawarma');
 
 // ── Generic phrases are NOT businesses ───────────────────
 // This is the important half. A false name is worse than no name.
@@ -41,6 +45,10 @@ check('bare food word', names('shawarma'), []);
 check('cheap pizza', names('cheapest pizza in scarborough'), []);
 check('empty text', names(''), []);
 check('no food term at all', names('this place was incredible honestly'), []);
+check('descriptive meal phrase is not a name', names('ordered their shawarma plate and it was great'), []);
+check('comparison venue is not the reviewed subject', names('this is better than Messi shawarma', 'transcript'), []);
+check('caption subject survives a comparison', names('Yasmine Shawarma is better than Messi Shawarma'), ['Yasmine Shawarma']);
+check('actual recovered caption yields the actual name', top('Trying the best shawarma in Mississauga? Yaseen shawarma Getting the shawarma plate. #torontoeats #torontofood #shawarma #mississauga #toronto'), 'Yaseen Shawarma');
 
 // ── Transliteration / mixed case ─────────────────────────
 check('transliterated name', top('zaytoun grill was unreal'), 'Zaytoun Grill');
@@ -60,8 +68,8 @@ const realTranscript =
   'than Messy Sharma. I would drive out the way for this plate.';
 check(
   'a transcript naming only comparisons yields no subject',
-  names(realTranscript, 'transcript').includes('Yasmine Shawarma'),
-  false
+  names(realTranscript, 'transcript'),
+  []
 );
 // And a caption that does name it still wins when one exists.
 check(

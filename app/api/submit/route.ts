@@ -49,10 +49,10 @@ export async function POST(request: NextRequest) {
       return badRequest('A JSON body is required');
     }
 
-    const { tiktokUrl, restaurantName, city } = body as Record<string, unknown>;
+    const { tiktokUrl, restaurantName, city, placeId } = body as Record<string, unknown>;
 
-    // Supplied when we had to ask: TikTok no longer returns captions, so a
-    // video whose transcript never names the place cannot be identified from
+    // Supplied when we had to ask: when retrieved caption/speech do not name
+    // the place, it cannot be identified from
     // the content alone.
     const hint = {
       restaurantName:
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
           ? restaurantName.trim().slice(0, 120)
           : null,
       city: typeof city === 'string' && city.trim() ? city.trim().slice(0, 80) : null,
+      placeId: typeof placeId === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(placeId) ? placeId : null,
     };
 
     if (typeof tiktokUrl !== 'string' || !tiktokUrl.trim()) {
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const submissionId = await createRawSubmission(url, user?.id ?? null, videoId);
+    const submissionId = await createRawSubmission(url, user?.id ?? null, videoId, hint);
 
     // Fast path: start draining as soon as the response is on the wire. If
     // this invocation dies first, the row is simply left `pending` and the
@@ -157,7 +158,7 @@ export async function POST(request: NextRequest) {
         // retrying" and then nothing. These failures are usually
         // nondeterministic, so trying again in seconds normally succeeds.
         for (let i = 0; i < QUEUE_CONFIG.maxAttempts; i++) {
-          const outcome = await drainSubmission(submissionId, { hint });
+          const outcome = await drainSubmission(submissionId);
           console.log('[Submit/after]', JSON.stringify(outcome));
           if (outcome.status !== 'retry') break;
           await new Promise((r) => setTimeout(r, 2000 * (i + 1)));

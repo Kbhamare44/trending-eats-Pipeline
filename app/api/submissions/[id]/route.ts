@@ -55,6 +55,8 @@ export async function GET(
     }
 
     const done = isTerminalStatus(record.status);
+    const needsLocation = (record.rejection_reason ?? '').startsWith(NEEDS_LOCATION);
+    const needsName = (record.rejection_reason ?? '').startsWith(NEEDS_NAME);
     const outcome =
       record.status === 'completed' ? await getSubmissionOutcome(id) : null;
 
@@ -62,7 +64,7 @@ export async function GET(
       submissionId: record.id,
       status: record.status,
       done,
-      label: describe(record.status, record.attempts ?? 0),
+      label: needsLocation ? 'Restaurant detected — confirm the location.' : needsName ? 'Help us identify the restaurant.' : describe(record.status, record.attempts ?? 0),
       restaurantId: outcome?.restaurantId ?? null,
       restaurantName: outcome?.restaurantName ?? null,
       // Rejection is a normal outcome (a recipe video, an unidentifiable
@@ -71,8 +73,11 @@ export async function GET(
       // Two different outcomes wear the same status: a dead end, and a
       // question the person can answer. The app shows a prompt for the
       // second rather than a flat "couldn't use this one".
-      needsLocation: (record.rejection_reason ?? '').startsWith(NEEDS_LOCATION),
-      needsName: (record.rejection_reason ?? '').startsWith(NEEDS_NAME),
+      needsLocation,
+      needsName,
+      detectedRestaurantName: record.resolution?.restaurantName ?? null,
+      nameEvidence: record.resolution?.nameSource ?? null,
+      placeOptions: record.resolution?.candidates ?? [],
       rejectionReason:
         (record.rejection_reason ?? '')
           .replace(NEEDS_LOCATION, '')

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { Script } from 'node:vm';
 import ts from 'typescript';
 
-function loadSource(file: string, dependencies: Record<string, unknown>, globals: Record<string, unknown> = {}): any {
+export function loadSource(file: string, dependencies: Record<string, unknown>, globals: Record<string, unknown> = {}): any {
   const javascript = ts.transpileModule(readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -16,16 +16,16 @@ function loadSource(file: string, dependencies: Record<string, unknown>, globals
     assert.ok(name in dependencies, `Unexpected dependency in ${file}: ${name}`);
     return dependencies[name];
   };
-  const quietConsole = { log() {}, warn() {}, error() {} };
+  const quietConsole = { log() {}, warn() {}, error() {}, info() {} };
   new Script(`(function(require, exports, console) {${javascript}\n})`, { filename: file })
-    .runInNewContext({ URL, ...globals })(requireMock, exports, quietConsole);
+    .runInNewContext({ URL, AbortSignal, ...globals })(requireMock, exports, quietConsole);
   return exports;
 }
 
 const speech = 'I went to Messi Shawarma in Brampton and ordered chicken shawarma.';
 const typedCaption = 'Visiting Messi Shawarma in Brampton.';
 
-function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null, savedVideo: any = null) {
+export function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null, savedVideo: any = null, overrides: { extraction?: any; place?: any; caption?: string } = {}) {
   const calls: { name: string; args: any[] }[] = [];
   const record = (name: string, result?: unknown) => async (...args: any[]) => {
     calls.push({ name, args });
@@ -41,6 +41,7 @@ function processorFixture(caption: string, transcriptStatus: string, transcriptT
     // The real module: it is pure text handling with no provider calls, so
     // mocking it would test the mock rather than the fallback.
     './nameCandidates': require('../lib/pipeline/nameCandidates'),
+    './caption': { fetchCaption: record('captionFallback', {text:overrides.caption ?? null,status:'not_attempted',source:null}) },
     './transcript': {
       fetchTranscript: record('transcript', { status: transcriptStatus, text: transcriptText, source: 'supadata', lang: 'en' }),
       saveTranscript: record('saveTranscript'),
@@ -49,10 +50,10 @@ function processorFixture(caption: string, transcriptStatus: string, transcriptT
       classifyContent: record('classify', { isRestaurantReview: true, confidence: 1, contentType: 'restaurant_review' }),
     },
     '@/lib/gemini/extract': {
-      extractRestaurantData: record('extract', { restaurantName: 'Messi Shawarma', city: 'Brampton', isSponsored: false }),
+      extractRestaurantData: record('extract', overrides.extraction ?? { restaurantName: 'Messi Shawarma', city: 'Brampton', isSponsored: false }),
     },
     '@/lib/google/places': {
-      findRestaurant: record('places', { placeId: 'test-place', name: 'Messi Shawarma', city: 'Brampton', address: 'Brampton' }),
+      findRestaurant: record('places', overrides.place ?? { placeId: 'test-place', name: 'Messi Shawarma', city: 'Brampton', address: 'Brampton', locationVerified:true }),
     },
     '@/lib/supabase/queries': {
       updateSubmissionWithTikTokData: record('saveMetadata'),
@@ -66,7 +67,7 @@ function processorFixture(caption: string, transcriptStatus: string, transcriptT
     },
     '@/lib/geo/gta': { isGta: () => true },
   });
-  return { run: () => processor.processSubmission('submission-1', 'https://www.tiktok.com/@oxtailpapi/video/7596836779760684308'), calls };
+  return { run: (hint?: any) => processor.processSubmission('submission-1', 'https://www.tiktok.com/@oxtailpapi/video/7596836779760684308', hint), calls };
 }
 
 let passed = 0;
@@ -192,7 +193,7 @@ async function run() {
       },
     };
     const classify = loadSource('lib/gemini/classify.ts', { './client': client });
-    const extract = loadSource('lib/gemini/extract.ts', { './client': client });
+    const extract = loadSource('lib/gemini/extract.ts', { './client': client, '@/lib/pipeline/nameCandidates': require('../lib/pipeline/nameCandidates') });
     await classify.classifyContent(typedCaption, 'oxtailpapi', speech);
     await extract.extractRestaurantData(typedCaption, 'oxtailpapi', undefined, speech);
     assert.equal(prompts.length, 2);
@@ -238,7 +239,7 @@ async function run() {
   if (failed) process.exitCode = 1;
 }
 
-run().catch(error => {
+if (require.main === module) run().catch(error => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });
