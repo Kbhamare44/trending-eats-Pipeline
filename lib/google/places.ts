@@ -108,7 +108,11 @@ async function findRestaurantLegacy(
     types: p.types ?? [], businessStatus: p.business_status,
   })), selectedPlaceId);
   if (!selection) return null;
-  if (!selection.locationVerified) return unconfirmedPlace(selection);
+  // Legacy Text Search has no address components. Its formatted address can
+  // omit the country or use a non-ASCII comma, so parsing it is not proof of
+  // a city. For one eligible result, verify the city in Place Details below.
+  // Multiple possible branches still require the person to choose.
+  if (selection.ambiguous || (!city && !selectedPlaceId)) return unconfirmedPlace(selection);
   const placeId = selection.chosen.placeId;
 
   const detailsResponse = await axios.get(`${LEGACY_BASE}/details/json`, {

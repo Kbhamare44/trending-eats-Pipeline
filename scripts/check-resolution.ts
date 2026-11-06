@@ -91,6 +91,11 @@ async function run() {
     const places=loadSource('lib/google/places.ts',{'axios':{default:{get:async()=>{throw new Error('provider unavailable');}}},'@/lib/geo/gta':{GTA_CENTER:{latitude:43.7,longitude:-79.4},isGta:()=>true,resolveGtaCity:()=>null}},{process:{env:{GOOGLE_PLACES_API_KEY:'offline-fixture'}}});
     await assert.rejects(()=>places.findRestaurant('Yaseen Shawarma','Mississauga'),/provider unavailable/);
   });
+  await check('legacy address formatting cannot block a city verified by Place Details',async()=>{
+    let requests=0;const address='5030 Maingate Dr Unit #5، Mississauga, ON L4W 1N5';
+    const places=loadSource('lib/google/places.ts',{'axios':{default:{get:async(url:string)=>{requests++;return{data:url.includes('/textsearch/')?{status:'OK',results:[{place_id:'verified-place',name:'Yaseen’s Shawarma',formatted_address:address,types:['restaurant'],business_status:'OPERATIONAL'}]}:{status:'OK',result:{name:'Yaseen’s Shawarma',formatted_address:address,types:['restaurant'],business_status:'OPERATIONAL',address_components:[{long_name:'Mississauga',types:['locality']}],geometry:{location:{lat:43.63,lng:-79.62}}}}};}}},'@/lib/geo/gta':{GTA_CENTER:{latitude:43.7,longitude:-79.4},isGta:()=>true,resolveGtaCity:()=>null}},{process:{env:{GOOGLE_PLACES_API_KEY:'offline-fixture'}}});
+    const result=await places.findRestaurant('Yaseen Shawarma','Mississauga');assert.equal(requests,2);assert.equal(result.locationVerified,true);assert.equal(result.city,'Mississauga');assert.equal(result.placeId,'verified-place');
+  });
   await check('a transcript cache error prevents another paid transcript request',async()=>{
     let requests=0;const chain:any={select(){return chain;},eq(){return chain;},not(){return chain;},limit(){return chain;},maybeSingle:async()=>({error:{message:'offline'}})};
     const transcript=loadSource('lib/pipeline/transcript.ts',{'@/lib/supabase/client':{supabase:{from:()=>chain}},'@/lib/config/transcript':{TRANSCRIPT_CONFIG:{enabled:true,captionLengthFloor:0}}},{process:{env:{SUPADATA_API_KEY:'offline-fixture'}},fetch:async()=>{requests++;}});
