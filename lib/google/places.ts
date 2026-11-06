@@ -66,7 +66,11 @@ async function findRestaurantLegacy(
   const searchResponse = await axios.get(`${LEGACY_BASE}/textsearch/json`, {
     params: {
       query,
-      type: 'restaurant',
+      // No `type: 'restaurant'` filter. Places does not classify a bakery,
+      // cafe, dessert shop or bar as a restaurant, so that filter returned
+      // zero results for "Bartholomew Bakery Vaughan" — a place already in
+      // our own database — and would have rejected a large slice of exactly
+      // what this app indexes. The name in the query is the constraint.
       region: 'ca',
       ...(biasToGta
         ? {
@@ -136,6 +140,7 @@ async function findRestaurantLegacy(
     placeId,
     name: details.name,
     address: details.formatted_address || '',
+    ambiguous,
     city: cityFromComponents(details.address_components, city),
     latitude: details.geometry?.location?.lat ?? 0,
     longitude: details.geometry?.location?.lng ?? 0,

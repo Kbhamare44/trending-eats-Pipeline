@@ -138,7 +138,20 @@ export async function processSubmission(
     // A chain with several branches, and the caption never said which city.
     // `city` above was our Toronto default, not evidence, so results[0] is a
     // guess at an address. Say we are unsure instead of inventing a branch.
-    if (place.ambiguous && !extraction.city) {
+    // Two ways the branch can be a guess rather than a match:
+    //   - another result carries the same name (a chain), or
+    //   - we searched our Toronto default and Google answered with a
+    //     different city, which means the city hint did nothing.
+    // "Messi Shawarma Toronto" returns a Brampton address: one result, so
+    // not ambiguous by name, but still not evidence of which branch the
+    // video meant.
+    const cityWasGuessed = !extraction.city;
+    const cityDisagrees =
+      cityWasGuessed &&
+      Boolean(place.city) &&
+      place.city.toLowerCase() !== city.toLowerCase();
+
+    if ((place.ambiguous || cityDisagrees) && cityWasGuessed) {
       const reason =
         `"${extraction.restaurantName}" has more than one location and the video ` +
         `does not say which. Add the city or neighbourhood and try again.`;
