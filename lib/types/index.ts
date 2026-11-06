@@ -59,6 +59,12 @@ export interface PlaceResult {
   attribution?: string[];
   /** When these fields were pulled — Places caching terms are time-limited. */
   fetchedAt?: string;
+  /**
+   * True when another result shares this name. Chains ("Messi Shawarma") have
+   * several branches, and taking results[0] picked whichever Google ranked
+   * first — a different address from the one in the video.
+   */
+  ambiguous?: boolean;
 }
 
 // Final processed submission

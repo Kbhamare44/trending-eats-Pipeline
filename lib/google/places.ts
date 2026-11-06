@@ -97,6 +97,9 @@ async function findRestaurantLegacy(
   if (!results || results.length === 0) return null;
 
   const placeId = results[0].place_id;
+  // Same name on a second result means we are looking at a chain and cannot
+  // tell which branch the video meant from the name alone.
+  const ambiguous = sameNamedRival(results[0]?.name, results[1]?.name);
 
   const detailsResponse = await axios.get(`${LEGACY_BASE}/details/json`, {
     params: {
@@ -209,6 +212,10 @@ async function findRestaurantNew(
 
   const place = response.data?.places?.[0];
   if (!place) return null;
+  const ambiguous = sameNamedRival(
+    place.displayName?.text,
+    response.data?.places?.[1]?.displayName?.text
+  );
 
   if (place.businessStatus && place.businessStatus !== 'OPERATIONAL') {
     console.log(
@@ -235,6 +242,7 @@ async function findRestaurantNew(
     googleRatingCount: place.userRatingCount ?? null,
     priceLevel:
       place.priceLevel != null ? NEW_PRICE_LEVELS[place.priceLevel] ?? null : null,
+    ambiguous,
     attribution:
       place.rating != null ? ['Ratings and place details from Google'] : [],
     fetchedAt: new Date().toISOString(),
@@ -273,6 +281,13 @@ export async function findRestaurant(
     }
     return null;
   }
+}
+
+/** Two results with the same name are two branches of one business. */
+function sameNamedRival(first?: string, second?: string): boolean {
+  if (!first || !second) return false;
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return norm(first) === norm(second);
 }
 
 export function buildPlaceSearchQuery(name: string, city: string): string {

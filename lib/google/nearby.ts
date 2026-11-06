@@ -64,11 +64,12 @@ function priceLevelToInt(value: unknown): number | null {
 async function searchLegacy(
   latitude: number,
   longitude: number,
-  category: string
+  category: string,
+  radiusM: number = OUTING_CONFIG.searchRadiusM
 ): Promise<NearbyActivity[]> {
   const params = new URLSearchParams({
     location: `${latitude},${longitude}`,
-    radius: String(OUTING_CONFIG.searchRadiusM),
+    radius: String(radiusM),
     type: category,
     key: apiKey(),
   });
@@ -117,7 +118,8 @@ async function searchLegacy(
 async function searchNew(
   latitude: number,
   longitude: number,
-  category: string
+  category: string,
+  radiusM: number = OUTING_CONFIG.searchRadiusM
 ): Promise<NearbyActivity[]> {
   const response = await fetch(NEW_NEARBY, {
     method: 'POST',
@@ -146,7 +148,7 @@ async function searchNew(
       locationRestriction: {
         circle: {
           center: { latitude, longitude },
-          radius: OUTING_CONFIG.searchRadiusM,
+          radius: radiusM,
         },
       },
     }),
@@ -195,18 +197,19 @@ async function searchNew(
 export async function findNearbyActivities(
   latitude: number,
   longitude: number,
-  options: { categories?: string[]; enough?: number } = {}
+  options: { categories?: string[]; enough?: number; radiusM?: number } = {}
 ): Promise<NearbyActivity[]> {
   const categories = options.categories ?? OUTING_CONFIG.categories;
   const enough = options.enough ?? OUTING_CONFIG.maxPairings * 3;
 
+  const radiusM = options.radiusM ?? OUTING_CONFIG.searchRadiusM;
   const found: NearbyActivity[] = [];
   const seen = new Set<string>();
 
   for (const category of categories) {
     const batch = useNewApi()
-      ? await searchNew(latitude, longitude, category)
-      : await searchLegacy(latitude, longitude, category);
+      ? await searchNew(latitude, longitude, category, radiusM)
+      : await searchLegacy(latitude, longitude, category, radiusM);
 
     for (const activity of batch) {
       if (seen.has(activity.placeId)) continue;

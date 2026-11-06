@@ -36,9 +36,12 @@ export interface WalkLeg {
  *
  * Returns null on any failure so the caller can estimate instead.
  */
+export type TravelMode = 'walk' | 'drive';
+
 export async function walkingLeg(
   origin: LatLng,
-  destination: LatLng
+  destination: LatLng,
+  mode: TravelMode = 'walk'
 ): Promise<WalkLeg | null> {
   if (!OUTING_CONFIG.useRoutesApi) return null;
 
@@ -60,7 +63,7 @@ export async function walkingLeg(
       body: JSON.stringify({
         origin: { location: { latLng: origin } },
         destination: { location: { latLng: destination } },
-        travelMode: 'WALK',
+        travelMode: mode === 'drive' ? 'DRIVE' : 'WALK',
         // Walking routes do not vary by traffic, so no departure time and no
         // traffic-aware model — both would cost more for an identical answer.
         languageCode: 'en-CA',

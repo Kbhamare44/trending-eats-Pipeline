@@ -142,5 +142,32 @@ check(
   true
 );
 
+// ── Options multiply the Routes bill ────────────────────
+// Each pairing now returns up to maxOptions activities, and each option can
+// cost a Routes element. Without a budget shared across the whole request the
+// billed count is pairings x options, which is the quadratic growth this
+// module was written to avoid in the first place.
+check(
+  'a shared Routes budget exists',
+  /routesBudget/.test(pairSource),
+  true
+);
+check(
+  'the budget is checked before each Routes call',
+  pairSource.indexOf('routesBudget > 0') < pairSource.indexOf('await walkingLeg('),
+  true
+);
+check(
+  'the budget cannot exceed pairings x options',
+  OUTING_CONFIG.maxRoutesCalls <= OUTING_CONFIG.maxPairings * OUTING_CONFIG.maxOptions,
+  true
+);
+check('options are capped', OUTING_CONFIG.maxOptions > 0 && OUTING_CONFIG.maxOptions <= 5, true);
+check(
+  'options are deduplicated by category',
+  /seenCategory/.test(pairSource),
+  true
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

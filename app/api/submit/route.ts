@@ -28,6 +28,7 @@ import {
   countRecentSubmissions,
 } from '@/lib/supabase/queries';
 import { LIMITS, tooManyRequests } from '@/lib/http/ratelimit';
+import { QUEUE_CONFIG } from '@/lib/config/pipeline';
 import { canonicalTikTokUrl, extractVideoId, isSubmittableTikTokUrl } from '@/lib/pipeline/tiktok';
 import { drainSubmission } from '@/lib/pipeline/worker';
 import { getAuthedUser, isAuthorizedCron } from '@/lib/auth/verify';
@@ -137,8 +138,19 @@ export async function POST(request: NextRequest) {
     // cron picks it up — which is why this is best-effort and not awaited.
     after(async () => {
       try {
-        const outcome = await drainSubmission(submissionId);
-        console.log('[Submit/after]', JSON.stringify(outcome));
+        // Retry here, not on the next cron. A transient failure (Gemini
+        // returning truncated JSON, a Places blip) releases the row back to
+        // `pending`, and the only thing that picked it up was a schedule —
+        // daily on Vercel Hobby, every 5-20 minutes via GitHub Actions. The
+        // app polls for 90 seconds, so the user saw "Still working on it —
+        // retrying" and then nothing. These failures are usually
+        // nondeterministic, so trying again in seconds normally succeeds.
+        for (let i = 0; i < QUEUE_CONFIG.maxAttempts; i++) {
+          const outcome = await drainSubmission(submissionId);
+          console.log('[Submit/after]', JSON.stringify(outcome));
+          if (outcome.status !== 'retry') break;
+          await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+        }
       } catch (err: any) {
         console.error('[Submit/after] unexpected:', err?.message ?? err);
       }

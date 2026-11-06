@@ -44,8 +44,17 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
     const city = params.get('city');
     const count = intParam(params.get('limit'), OUTING_CONFIG.maxPairings, OUTING_CONFIG.maxPairings);
+    const restaurantId = params.get('restaurantId');
+    const mode = params.get('mode') === 'drive' ? 'drive' : 'walk';
+    const maxMinutes = params.get('maxMinutes') ? Number(params.get('maxMinutes')) : null;
 
-    const result = await buildPairings({ city, limit: count });
+    const result = await buildPairings({
+      city,
+      limit: restaurantId ? 1 : count,
+      restaurantId,
+      mode,
+      maxMinutes: Number.isFinite(maxMinutes as number) ? maxMinutes : null,
+    });
 
     return ok({
       pairings: result.pairings,
@@ -57,6 +66,8 @@ export async function GET(request: NextRequest) {
             ? 'Trending, and something to do after'
             : 'Somewhere to eat, and something to do after',
         city: city ?? 'all',
+        mode,
+        maxMinutes,
         // Required wherever Google-sourced data is displayed.
         attribution: 'Activity details and ratings from Google',
       },

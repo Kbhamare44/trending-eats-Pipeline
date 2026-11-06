@@ -29,7 +29,7 @@ import { activityQuality, activityScore, activityReason } from '@/lib/outings/qu
 import { supabase } from '@/lib/supabase/client';
 import { OUTING_CONFIG } from '@/lib/config/outings';
 import { findNearbyActivities, type NearbyActivity } from '@/lib/google/nearby';
-import { walkingLeg } from '@/lib/google/routes';
+import { walkingLeg, type TravelMode } from '@/lib/google/routes';
 import { haversineMetres, estimateWalkMinutes } from '@/lib/geo/distance';
 
 export interface PairedActivity {
@@ -58,13 +58,23 @@ export interface OutingPairing {
     /** 'ranked' | 'warming_up' | 'insufficient_data'. */
     trendState: string;
   };
-  activity: PairedActivity;
-  walk: {
-    minutes: number;
-    metres: number;
-    /** False means a straight-line estimate, not a measured route. */
-    measured: boolean;
-  };
+  /**
+   * Distinct things to do nearby, best first, one per category.
+   *
+   * Several rather than one because a single suggestion is take-it-or-leave-it,
+   * and "a park" is no substitute for "a cinema". Categories are deduplicated
+   * so three options are three kinds of evening, not three parks.
+   */
+  options: Array<{
+    activity: PairedActivity;
+    travel: {
+      minutes: number;
+      metres: number;
+      /** False means a straight-line estimate, not a measured route. */
+      measured: boolean;
+      mode: TravelMode;
+    };
+  }>;
   /** Render-ready, and never claims momentum we cannot support. */
   headline: string;
   reason: string;
@@ -147,7 +157,18 @@ function headlineFor(restaurantName: string, activityName: string, trendState: s
 export async function buildPairings(options: {
   city?: string | null;
   limit?: number;
+  /** Focus one restaurant — what the detail sheet asks for. */
+  restaurantId?: string | null;
+  mode?: TravelMode;
+  /** Drop anything further than this many minutes away. */
+  maxMinutes?: number | null;
 }): Promise<PairingResult> {
+  const mode: TravelMode = options.mode === 'drive' ? 'drive' : 'walk';
+  const maxMinutes =
+    typeof options.maxMinutes === 'number' && options.maxMinutes > 0
+      ? options.maxMinutes
+      : null;
+  let routesBudget = OUTING_CONFIG.maxRoutesCalls;
   const limit = Math.max(1, Math.min(options.limit ?? OUTING_CONFIG.maxPairings, OUTING_CONFIG.maxPairings));
 
   // Ranked restaurants first. Ask for more than `limit` because some will
@@ -162,7 +183,9 @@ export async function buildPairings(options: {
     .not('latitude', 'is', null)
     .not('longitude', 'is', null);
 
-  if (options.city && options.city !== 'all') {
+  if (options.restaurantId) {
+    query = query.eq('id', options.restaurantId);
+  } else if (options.city && options.city !== 'all') {
     query = query.eq('city', options.city);
   }
 
@@ -176,6 +199,20 @@ export async function buildPairings(options: {
   let candidates = ranked ?? [];
   let basis: 'ranked' | 'recent' = 'ranked';
   let note: string | null = null;
+
+  if (candidates.length === 0 && options.restaurantId) {
+    // Asked about one restaurant that is not ranked. Use it rather than
+    // silently answering about a different one.
+    const { data: one } = await supabase
+      .from('restaurants')
+      .select(columns)
+      .eq('id', options.restaurantId)
+      .maybeSingle();
+    if (one) {
+      candidates = [one];
+      basis = 'recent';
+    }
+  }
 
   if (candidates.length === 0) {
     // Nothing is ranked. Fall back to recently added and SAY SO, rather than
@@ -218,7 +255,7 @@ export async function buildPairings(options: {
     let nearby: NearbyActivity[] = [];
     searchAttempts++;
     try {
-      nearby = await findNearbyActivities(restaurant.latitude, restaurant.longitude);
+      nearby = await findNearbyActivities(restaurant.latitude, restaurant.longitude, mode === 'drive' ? { radiusM: OUTING_CONFIG.driveRadiusM } : {});
     } catch (err: any) {
       searchFailures++;
       if (!firstError) firstError = err?.message ?? String(err);
@@ -240,20 +277,82 @@ export async function buildPairings(options: {
       .filter((c) => c.metres <= OUTING_CONFIG.maxStraightLineM && !usedActivities.has(c.activity.placeId) && (usedCategories.get(c.activity.category) ?? 0) < 2 && activityQuality(c.activity))
       .sort((a, b) => activityScore(b.activity, b.metres, usedCategories.has(b.activity.category)) - activityScore(a.activity, a.metres, usedCategories.has(a.activity.category)) || a.metres - b.metres);
 
-    const best = scored[0];
-    if (!best) continue;
+    // One option per category, so three suggestions are three different
+    // kinds of evening rather than three parks.
+    const seenCategory = new Set<string>();
+    const picked = scored
+      .filter((c) => {
+        if (seenCategory.has(c.activity.category)) return false;
+        seenCategory.add(c.activity.category);
+        return true;
+      })
+      .slice(0, OUTING_CONFIG.maxOptions);
 
-    // One Routes element, for the pair already chosen.
-    const measured = await walkingLeg(
-      { latitude: restaurant.latitude, longitude: restaurant.longitude },
-      { latitude: best.activity.latitude, longitude: best.activity.longitude }
-    );
-    if (OUTING_CONFIG.useRoutesApi && process.env.GOOGLE_PLACES_API_KEY) routesCalled++;
+    if (picked.length === 0) continue;
 
-    if (measured && measured.minutes > 25) continue; // a large detour is not a walkable pairing
-    const activityId = await upsertActivity(best.activity);
-    usedActivities.add(best.activity.placeId);
-    usedCategories.set(best.activity.category, (usedCategories.get(best.activity.category) ?? 0) + 1);
+    const built: OutingPairing['options'] = [];
+    for (const candidate of picked) {
+      // Routes is budgeted across the WHOLE request. Options multiply
+      // pairings, so without a shared ceiling the billed element count is
+      // their product. Past the ceiling the leg falls back to the
+      // straight-line estimate, which is already labelled as one.
+      let leg: Awaited<ReturnType<typeof walkingLeg>> = null;
+      if (routesBudget > 0) {
+        leg = await walkingLeg(
+          { latitude: restaurant.latitude, longitude: restaurant.longitude },
+          { latitude: candidate.activity.latitude, longitude: candidate.activity.longitude },
+          mode
+        );
+        if (leg) {
+          routesCalled++;
+          routesBudget--;
+        }
+      }
+
+      const travel = leg
+        ? { ...leg, mode }
+        : {
+            minutes: estimateWalkMinutes(
+              candidate.metres,
+              mode === 'drive'
+                ? OUTING_CONFIG.walkMetresPerMinute * 6
+                : OUTING_CONFIG.walkMetresPerMinute
+            ),
+            metres: Math.round(candidate.metres),
+            measured: false,
+            mode,
+          };
+
+      // A large detour is not an outing. The caller's limit wins when given.
+      const ceiling = maxMinutes ?? (mode === 'drive' ? 30 : 25);
+      if (travel.minutes > ceiling) continue;
+
+      const activityId = await upsertActivity(candidate.activity);
+      usedActivities.add(candidate.activity.placeId);
+      usedCategories.set(
+        candidate.activity.category,
+        (usedCategories.get(candidate.activity.category) ?? 0) + 1
+      );
+      built.push({
+        activity: {
+          id: activityId,
+          placeId: candidate.activity.placeId,
+          name: candidate.activity.name,
+          category: candidate.activity.category,
+          address: candidate.activity.address,
+          latitude: candidate.activity.latitude,
+          longitude: candidate.activity.longitude,
+          googleRating: candidate.activity.googleRating,
+          googleRatingCount: candidate.activity.googleRatingCount,
+          priceLevel: candidate.activity.priceLevel,
+          attribution: candidate.activity.attribution,
+        },
+        travel,
+      });
+    }
+
+    if (built.length === 0) continue;
+    const best = picked[0];
 
     pairings.push({
       restaurant: {
@@ -266,28 +365,15 @@ export async function buildPairings(options: {
         longitude: restaurant.longitude,
         trendState: restaurant.trend_state ?? 'insufficient_data',
       },
-      activity: {
-        id: activityId,
-        placeId: best.activity.placeId,
-        name: best.activity.name,
-        category: best.activity.category,
-        address: best.activity.address,
-        latitude: best.activity.latitude,
-        longitude: best.activity.longitude,
-        googleRating: best.activity.googleRating,
-        googleRatingCount: best.activity.googleRatingCount,
-        priceLevel: best.activity.priceLevel,
-        attribution: best.activity.attribution,
-      },
-      walk: measured ?? {
-        minutes: estimateWalkMinutes(best.metres, OUTING_CONFIG.walkMetresPerMinute),
-        metres: Math.round(best.metres),
-        measured: false,
-      },
-      reason: activityReason(best.activity, measured?.minutes ?? estimateWalkMinutes(best.metres, OUTING_CONFIG.walkMetresPerMinute), Boolean(measured)),
+      options: built,
+      reason: activityReason(
+        best.activity,
+        built[0].travel.minutes,
+        built[0].travel.measured
+      ),
       headline: headlineFor(
         restaurant.name,
-        best.activity.name,
+        built[0].activity.name,
         restaurant.trend_state ?? 'insufficient_data'
       ),
     });

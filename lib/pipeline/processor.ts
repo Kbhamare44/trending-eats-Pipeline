@@ -135,6 +135,17 @@ export async function processSubmission(
       return { success: false, rejectionReason: 'Restaurant not found on Google Places' };
     }
 
+    // A chain with several branches, and the caption never said which city.
+    // `city` above was our Toronto default, not evidence, so results[0] is a
+    // guess at an address. Say we are unsure instead of inventing a branch.
+    if (place.ambiguous && !extraction.city) {
+      const reason =
+        `"${extraction.restaurantName}" has more than one location and the video ` +
+        `does not say which. Add the city or neighbourhood and try again.`;
+      await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason: reason });
+      return { success: false, rejectionReason: reason };
+    }
+
     // ── Step 5: Get or create restaurant ──────────────
     console.log(`[Pipeline] Saving to database...`);
     let restaurantId: string;

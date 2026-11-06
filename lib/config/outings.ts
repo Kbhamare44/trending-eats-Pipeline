@@ -40,6 +40,20 @@ export const OUTING_CONFIG = {
    */
   maxPairings: num('OUTING_MAX_PAIRINGS', 3),
 
+  /** Distinct things to do offered for one restaurant. */
+  maxOptions: num('OUTING_MAX_OPTIONS', 3),
+
+  /**
+   * Hard ceiling on Routes elements per request, across all pairings and
+   * options. Options multiply pairings, so without this the element count
+   * grows as the product of the two. Past the ceiling, remaining legs fall
+   * back to the straight-line estimate, which is already labelled as one.
+   */
+  maxRoutesCalls: num('OUTING_MAX_ROUTES_CALLS', 6),
+
+  /** Driving reaches further than walking, so the radius depends on mode. */
+  driveRadiusM: num('OUTING_DRIVE_RADIUS_M', 8000),
+
   /**
    * Metres around a restaurant to look for something to do.
    *
