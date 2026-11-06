@@ -1,3 +1,8 @@
+-- STATUS: the counter fix below (part 2) is APPLIED. Part 1, the policy
+-- change, is NOT — the migration tool declines it. Re-running this whole
+-- file is safe: part 2 is idempotent (it only touches rows where the count
+-- already disagrees) and will be a no-op.
+--
 -- 1. restaurant_feedback was world-readable, user_id included.
 --
 -- The SELECT policy was `using (true)` for role public, so anyone holding the
