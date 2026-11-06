@@ -101,6 +101,12 @@ async function run() {
     const transcript=loadSource('lib/pipeline/transcript.ts',{'@/lib/supabase/client':{supabase:{from:()=>chain}},'@/lib/config/transcript':{TRANSCRIPT_CONFIG:{enabled:true,captionLengthFloor:0}}},{process:{env:{SUPADATA_API_KEY:'offline-fixture'}},fetch:async()=>{requests++;}});
     await assert.rejects(()=>transcript.fetchTranscript('https://www.tiktok.com/@test/video/123',{videoId:'123',captionLength:0}),/cache/);assert.equal(requests,0);
   });
+  await check('unsupported model praise and criticism cannot become stored review bullets',async()=>{
+    const speech="I would drive out the way for this plate. Just don't like the salad.";
+    const extract=loadSource('lib/gemini/extract.ts',{'./client':{MODELS:{extract:'offline'},generateJSON:async()=>({pros:['I would drive out the way for this plate.','Exceptional service and perfect atmosphere'],cons:["Just don't like the salad.",'pink sauce looks questionable to some']})},'@/lib/pipeline/nameCandidates':require('../lib/pipeline/nameCandidates')});
+    const result=await extract.extractRestaurantData(caption,'test',undefined,speech);
+    assert.deepEqual(Array.from(result.pros),['I would drive out the way for this plate.']);assert.deepEqual(Array.from(result.cons),["Just don't like the salad."]);
+  });
   console.log(`Resolution checks: ${passed} passed`);
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});
