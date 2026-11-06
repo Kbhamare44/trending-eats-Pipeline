@@ -85,7 +85,30 @@ export async function GET(request: NextRequest) {
     const zoom = Number.isFinite(zoomRaw) ? zoomRaw : MAP_CONFIG.pinZoomThreshold;
 
     const gtaOnly = params.get('gtaOnly') === 'true';
-    const mode = zoom >= MAP_CONFIG.pinZoomThreshold ? 'pins' : 'clusters';
+
+    // Cluster only when there is actually something to collapse.
+    //
+    // At GTA zoom the map was in cluster mode by zoom alone, so six
+    // restaurants rendered as black "1" bubbles — a count bubble over a
+    // single place, which cannot show what the place is and cannot be
+    // tapped open. Clustering exists to stop a hundred markers choking
+    // react-native-maps; below that it only destroys information.
+    let mode = zoom >= MAP_CONFIG.pinZoomThreshold ? 'pins' : 'clusters';
+
+    if (mode === 'clusters') {
+      const { data: probe, error: probeError } = await supabase.rpc('te_restaurant_clusters', {
+        min_lat: bounds.minLat,
+        min_lng: bounds.minLng,
+        max_lat: bounds.maxLat,
+        max_lng: bounds.maxLng,
+        grid_size: clusterGridForZoom(zoom),
+        gta_only: gtaOnly,
+      });
+      if (!probeError) {
+        const total = (probe ?? []).reduce((sum: number, r: any) => sum + Number(r.n ?? 0), 0);
+        if (total <= MAP_CONFIG.maxPins) mode = 'pins';
+      }
+    }
 
     if (mode === 'clusters') {
       const grid = clusterGridForZoom(zoom);
