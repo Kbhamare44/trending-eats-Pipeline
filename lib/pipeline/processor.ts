@@ -59,6 +59,30 @@ export async function processSubmission(
       return { success: true, restaurantId: savedVideo.restaurantId, restaurantName: savedVideo.restaurantName, isExistingRestaurant: true };
     }
 
+    // Dedupe again, now that we know the REAL video id.
+    //
+    // /api/submit already checks, but a share link from the TikTok app looks
+    // like vt.tiktok.com/ZSpjuYYF7 and extractVideoId can only return that
+    // short code without following the redirect. The reviews table stores
+    // the numeric id, so the check at the door misses every short link —
+    // which is why 36 submissions exist for 11 videos. oEmbed has just
+    // resolved it, so this costs one indexed lookup and saves a Supadata
+    // credit, two Gemini calls and two Places calls per repeat.
+    if (tiktokData.videoId) {
+      const seen = await findReviewByVideoId(tiktokData.videoId);
+      if (seen) {
+        await updateSubmissionStatus(submissionId, 'completed');
+        console.log(`[Pipeline] Already have ${tiktokData.videoId} — skipping analysis`);
+        return {
+          success: true,
+          restaurantId: seen.restaurantId,
+          restaurantName: seen.restaurantName,
+          isExistingRestaurant: true,
+          inCoverageArea: true,
+        };
+      }
+    }
+
     // ── Step 1b: Transcript ────────────────────────────
     // Runs here, in the background worker, never in the request path.
     // oEmbed can return an embed while omitting a caption visible in TikTok.

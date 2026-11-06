@@ -193,6 +193,18 @@ check(
 check('concurrent drains are gated below the batch size', QUEUE_CONFIG.maxConcurrentDrains < QUEUE_CONFIG.batchSize, true);
 check('at least one drain can run', QUEUE_CONFIG.maxConcurrentDrains >= 1, true);
 
+// A share link from the TikTok app is a short code, not the video id, so the
+// check at the door cannot catch it. The pipeline must re-check after oEmbed
+// resolves the real id, or every short link pays for a full analysis of a
+// video we already hold.
+check('a short link does not yield a numeric video id',
+  /^\d+$/.test(extractVideoId('https://vt.tiktok.com/ZSpjuYYF7') ?? ''), false);
+const procSource = require('node:fs').readFileSync('lib/pipeline/processor.ts', 'utf8');
+check('the processor re-checks for an existing review after oEmbed',
+  /findReviewByVideoId\(tiktokData\.videoId\)/.test(procSource), true);
+check('that check runs before the Gemini calls',
+  procSource.indexOf('findReviewByVideoId(tiktokData.videoId)') < procSource.indexOf('classifyContent('), true);
+
 console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }
