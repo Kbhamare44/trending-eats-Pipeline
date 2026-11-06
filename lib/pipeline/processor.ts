@@ -133,6 +133,12 @@ export async function processSubmission(
       transcript.text ?? undefined
     );
 
+    if (classification.isSafeToPublish === false) {
+      const rejectionReason = 'This content does not meet our community content guidelines.';
+      await updateSubmissionStatus(submissionId, 'rejected', { rejectionReason });
+      return { success: false, rejectionReason };
+    }
+
     if (!classification.isRestaurantReview || classification.confidence < 0.4) {
       await updateSubmissionStatus(submissionId, 'rejected', {
         rejectionReason: `Not a restaurant review (${classification.contentType}, confidence: ${classification.confidence})`,

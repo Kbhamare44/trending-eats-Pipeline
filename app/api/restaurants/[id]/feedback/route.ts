@@ -15,6 +15,7 @@ import type { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 import { getAuthedUser } from '@/lib/auth/verify';
 import { recomputeExperienceSignals } from '@/lib/trends/recompute';
+import { feedbackAuthorRef, isObjectionableText } from '@/lib/moderation';
 import {
   ok,
   created,
@@ -35,7 +36,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from('restaurant_feedback')
-      .select('rating, would_return, visited, dish, comment, created_at')
+      .select('id, user_id, rating, would_return, visited, dish, comment, created_at')
       .eq('restaurant_id', id)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -50,11 +51,13 @@ export async function GET(
 
     return ok({
       feedback: (data ?? []).map((f) => ({
+        id: f.id,
+        authorRef: feedbackAuthorRef(f.user_id),
         rating: f.rating,
         wouldReturn: f.would_return,
         visited: f.visited,
-        dish: f.dish,
-        comment: f.comment,
+        dish: isObjectionableText(f.dish) ? null : f.dish,
+        comment: isObjectionableText(f.comment) ? null : f.comment,
         createdAt: f.created_at,
       })),
       summary: {
@@ -110,6 +113,9 @@ export async function POST(
       typeof comment === 'string' ? comment.trim().slice(0, 1000) : null;
     const trimmedDish =
       typeof dish === 'string' ? dish.trim().slice(0, 120) : null;
+    if (isObjectionableText(trimmedComment) || isObjectionableText(trimmedDish)) {
+      return badRequest('Please remove abusive, explicit or threatening language and links. Honest negative food reviews are welcome.');
+    }
 
     const { data: existing } = await supabase
       .from('restaurant_feedback')

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Trending Eats handles account information, submitted links, location, activity and account deletion.">
+  <title>Privacy Policy · Trending Eats</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0d0d0d;color:#eee;font:17px/1.65 system-ui,-apple-system,sans-serif}main{max-width:780px;margin:auto;padding:48px 24px 72px}nav{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:40px}a{color:#ff8298;text-underline-offset:4px}a:focus-visible{outline:2px solid #ff8298;outline-offset:5px}h1{font-size:clamp(32px,7vw,46px);line-height:1.15;margin-bottom:12px}h2{font-size:23px;line-height:1.3;margin-top:36px}p,li{color:#ccc}li{margin:10px 0}.muted{color:#aaa;font-size:15px}strong{color:#eee}footer{border-top:1px solid #333;margin-top:40px;padding-top:20px}
+  </style>
+</head>
+<body>
+<main>
+  <nav aria-label="Trending Eats information"><a href="support.html">Support</a><a href="privacy.html" aria-current="page">Privacy Policy</a></nav>
+  <h1>Trending Eats Privacy Policy</h1>
+  <p class="muted">Updated November 6, 2026</p>
+  <p>Trending Eats helps people discover restaurants and nearby activities, initially in Toronto and the Greater Toronto Area. This policy describes the information used by the app and its connected services.</p>
+
+  <h2>Information you provide</h2>
+  <ul>
+    <li><strong>Account information:</strong> your email address and authentication information are handled through Supabase Auth. Email confirmation is required to use a new account.</li>
+    <li><strong>Saved places and activity:</strong> saved restaurants, community spots, itineraries and restaurant feedback are associated with your account when you use those features.</li>
+    <li><strong>Submitted content:</strong> when you submit a TikTok link, we process its public caption, spoken transcript, creator username and available embed metadata to identify the restaurant and describe the review. Restaurant listings, linked source videos, extracted review information and feedback you choose to publish can be visible to other people. Feedback is displayed without your account email.</li>
+    <li><strong>Optional coverage waitlist:</strong> if you join the waitlist, we store your email address, the city you provide and the signup source so we can record interest and notify you about coverage.</li>
+    <li><strong>Support requests:</strong> if you email us, we receive your message and the contact information you include. Do not send passwords or verification codes.</li>
+    <li><strong>Content reports:</strong> an in-app report sends the restaurant ID, reported content ID and type, a selected reason, and an optional signed-in account ID to our service. A timestamp is recorded when it is saved in a service-only Supabase queue for human review. The in-app report form does not collect free-text messages or a contact email.</li>
+  </ul>
+
+  <h2>Location and browsing</h2>
+  <p>The app asks for foreground location permission when you choose to find yourself on the map. The current app uses that position on your device to centre the map and check coverage; it does not send a GPS location history to our app database. You can browse without granting location access and change permission in iPhone Settings.</p>
+  <p>We record first-party activity such as restaurant views, dish views, searches and saves to calculate trends inside Trending Eats. Signed-in activity can be associated with your account ID. Guest activity uses a random identifier stored for this app installation, rather than an advertising identifier. The app does not include an advertising SDK.</p>
+  <p>Blocked-creator and blocked-author preferences for restaurant pages are stored on this device. Guest preferences and each signed-in account's preferences are kept separately; the lists are not synced to our database or to another device. Blocking hides the selected creator's or author's content for that local profile. It does not delete the original content or block it for other people. You can reset blocked authors from a restaurant page.</p>
+
+  <h2>Diagnostics and service providers</h2>
+  <p>To investigate failures, the app can send an error message, stack trace, screen context label, app version, operating-system information and the app's random installation identifier to our backend logs. Hosting providers can also process ordinary connection information, including IP addresses, when handling requests and preventing abuse.</p>
+  <p>We use Supabase for authentication and data storage, Vercel for the restaurant pipeline and hosting, and Railway for community-spot services. These providers process information needed to operate those features.</p>
+  <p>For a TikTok link a person submits, Supadata receives the link to retrieve text metadata or a transcript. Google Gemini receives the available caption, transcript and public creator username to classify and extract restaurant information. Google Places verifies business details, and Google Routes can calculate walking routes between a restaurant and an activity. The app does not send your account password to these content-processing services.</p>
+  <p>TikTok video playback remains with TikTok. Loading an embedded video or opening TikTok, directions or another external link connects to that service, which handles connection information and any account you use there under its own privacy practices. We do not download or re-host TikTok video or audio files.</p>
+
+  <h2>Storage and deletion</h2>
+  <p>Account records and private app data are kept to provide the account features until removed. In the app, open <strong>Profile → Delete account</strong> and confirm to delete the account through our backend. The flow removes private saves, itineraries, restaurant feedback and activity linked to that account, removes the submitter link from pipeline submissions, and deletes the authentication account. The app reports a failure if deletion cannot finish.</p>
+  <p><strong>Account deletion does not remove public restaurant listings or third-party TikTok review records.</strong> Those public records can remain without your app account attached. You can separately request a correction or removal through the restaurant's report link or by contacting support. Include the restaurant or video link so we can identify the record.</p>
+  <p>Content reports can be retained for moderation after account deletion, with their reporter-account link removed. Reporting content does not by itself remove that content from the service.</p>
+  <p>A coverage waitlist signup is separate from an app account. Contact support to request removal from the waitlist or ask about data associated with a guest installation. Service logs and backups follow the relevant providers' retention processes; the app does not promise that deleting an account immediately erases every provider log or backup.</p>
+
+  <h2>Your choices and contact</h2>
+  <p>You can browse as a guest, decline location access, avoid loading external videos, sign out, or delete an account. For access, correction, removal, privacy questions or another data request, email <a href="mailto:kbhamare0@outlook.com?subject=Trending%20Eats%20privacy%20request">kbhamare0@outlook.com</a>. We may need enough information to locate a record and confirm that a request concerns your account.</p>
+  <footer><a href="support.html">Trending Eats Support</a></footer>
+</main>
+</body>
+</html>

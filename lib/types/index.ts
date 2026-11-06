@@ -32,6 +32,8 @@ export interface SubmissionResolution {
 // AI classification result
 export interface ClassificationResult {
   isRestaurantReview: boolean;
+  /** Text safety check in the existing classification call, not a new provider. */
+  isSafeToPublish: boolean;
   contentType: 'restaurant_review' | 'recipe' | 'cooking_tutorial' | 'travel_vlog' | 'unrelated';
   confidence: number;
   reasoning: string;

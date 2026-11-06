@@ -17,6 +17,7 @@ import {
 } from '@/lib/presenters/restaurant';
 import { ok, notFound, serverError } from '@/lib/http/respond';
 import { getAuthedUser } from '@/lib/auth/verify';
+import { feedbackAuthorRef, isObjectionableText } from '@/lib/moderation';
 
 export async function GET(
   request: NextRequest,
@@ -54,7 +55,7 @@ export async function GET(
 
     const { data: feedback, error: feedbackError } = await supabase
       .from('restaurant_feedback')
-      .select('rating, would_return, dish, comment, created_at')
+      .select('id, user_id, rating, would_return, dish, comment, created_at')
       .eq('restaurant_id', id)
       .order('created_at', { ascending: false })
       .limit(20);
@@ -111,10 +112,12 @@ export async function GET(
         createdAt: r.created_at,
       })),
       feedback: (feedback ?? []).map((f) => ({
+        id: f.id,
+        authorRef: feedbackAuthorRef(f.user_id),
         rating: f.rating,
         wouldReturn: f.would_return,
-        dish: f.dish,
-        comment: f.comment,
+        dish: isObjectionableText(f.dish) ? null : f.dish,
+        comment: isObjectionableText(f.comment) ? null : f.comment,
         createdAt: f.created_at,
       })),
       viewer,

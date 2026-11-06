@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "tsc --noEmit && tsx scripts/check-dishes.ts && tsx scripts/check-trends.ts && tsx scripts/check-geo.ts && tsx scripts/check-queue.ts && tsx scripts/check-map.ts && tsx scripts/check-outings.ts && tsx scripts/check-transcript.ts && tsx scripts/check-activity-quality.ts && tsx scripts/check-idempotency.ts && tsx scripts/check-outing-budget.ts && tsx scripts/check-names.ts && tsx scripts/check-resolution.ts",
+    "check": "tsc --noEmit && tsx scripts/check-dishes.ts && tsx scripts/check-trends.ts && tsx scripts/check-geo.ts && tsx scripts/check-queue.ts && tsx scripts/check-map.ts && tsx scripts/check-outings.ts && tsx scripts/check-transcript.ts && tsx scripts/check-activity-quality.ts && tsx scripts/check-idempotency.ts && tsx scripts/check-outing-budget.ts && tsx scripts/check-names.ts && tsx scripts/check-resolution.ts && tsx scripts/check-moderation.ts",
     "check:dishes": "tsx scripts/check-dishes.ts",
     "check:trends": "tsx scripts/check-trends.ts",
     "seed": "tsx scripts/seed-submissions.ts",

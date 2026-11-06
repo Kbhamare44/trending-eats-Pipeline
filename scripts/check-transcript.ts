@@ -25,7 +25,7 @@ export function loadSource(file: string, dependencies: Record<string, unknown>, 
 const speech = 'I went to Messi Shawarma in Brampton and ordered chicken shawarma.';
 const typedCaption = 'Visiting Messi Shawarma in Brampton.';
 
-export function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null, savedVideo: any = null, overrides: { extraction?: any; place?: any; caption?: string } = {}) {
+export function processorFixture(caption: string, transcriptStatus: string, transcriptText: string | null, savedVideo: any = null, overrides: { extraction?: any; place?: any; caption?: string; classification?: any } = {}) {
   const calls: { name: string; args: any[] }[] = [];
   const record = (name: string, result?: unknown) => async (...args: any[]) => {
     calls.push({ name, args });
@@ -47,7 +47,7 @@ export function processorFixture(caption: string, transcriptStatus: string, tran
       saveTranscript: record('saveTranscript'),
     },
     '@/lib/gemini/classify': {
-      classifyContent: record('classify', { isRestaurantReview: true, confidence: 1, contentType: 'restaurant_review' }),
+      classifyContent: record('classify', overrides.classification ?? { isRestaurantReview: true, isSafeToPublish: true, confidence: 1, contentType: 'restaurant_review' }),
     },
     '@/lib/gemini/extract': {
       extractRestaurantData: record('extract', overrides.extraction ?? { restaurantName: 'Messi Shawarma', city: 'Brampton', isSponsored: false }),
@@ -189,7 +189,7 @@ async function run() {
       MODELS: { classify: 'offline', extract: 'offline' },
       generateJSON: async (prompt: { userMessage: string; systemInstruction: string }) => {
         prompts.push(prompt);
-        return { isRestaurantReview: true, restaurantName: 'Messi Shawarma' };
+        return { isRestaurantReview: true, isSafeToPublish: true, restaurantName: 'Messi Shawarma' };
       },
     };
     const classify = loadSource('lib/gemini/classify.ts', { './client': client });
