@@ -19,7 +19,7 @@ import {
   isTerminalStatus,
 } from '@/lib/supabase/queries';
 import { QUEUE_CONFIG } from '@/lib/config/pipeline';
-import { NEEDS_LOCATION } from '@/lib/pipeline/processor';
+import { NEEDS_LOCATION, NEEDS_NAME } from '@/lib/pipeline/processor';
 import { ok, notFound, serverError } from '@/lib/http/respond';
 
 /** Human-readable text for each state, so the app does not build its own. */
@@ -72,8 +72,11 @@ export async function GET(
       // question the person can answer. The app shows a prompt for the
       // second rather than a flat "couldn't use this one".
       needsLocation: (record.rejection_reason ?? '').startsWith(NEEDS_LOCATION),
+      needsName: (record.rejection_reason ?? '').startsWith(NEEDS_NAME),
       rejectionReason:
-        (record.rejection_reason ?? '').replace(NEEDS_LOCATION, '') || null,
+        (record.rejection_reason ?? '')
+          .replace(NEEDS_LOCATION, '')
+          .replace(NEEDS_NAME, '') || null,
       attempts: record.attempts ?? 0,
       maxAttempts: QUEUE_CONFIG.maxAttempts,
       createdAt: record.created_at,

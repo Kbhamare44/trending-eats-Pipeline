@@ -132,6 +132,15 @@ export async function fetchTikTokData(url: string): Promise<TikTokData> {
     videoId,
     url: fullUrl,
     // Missing title means metadata was omitted, not that the video lacks a caption.
+    // TikTok REMOVED `title`, `author_name` and `thumbnail_url` from oEmbed
+    // somewhere between 2026-08 and 2026-11. Every submission up to 08-23 has
+    // a caption (30/30); every one since has none (0/14). The response is now
+    // just the iframe plus provider metadata.
+    //
+    // So captions are gone, and extraction runs on the transcript alone. When
+    // that yields no restaurant name the person is asked for it rather than
+    // rejected — see NEEDS_NAME in lib/pipeline/processor.ts. Do not spend
+    // time "fixing" caption parsing; there is nothing to parse.
     caption: typeof data.title === 'string' ? data.title.trim() : '',
     creatorUsername: data.author_name || new URL(fullUrl).pathname.match(/^\/@([^/]+)\//)?.[1] || '',
     thumbnailUrl: data.thumbnail_url || '',

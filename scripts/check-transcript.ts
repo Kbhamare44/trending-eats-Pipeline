@@ -38,6 +38,9 @@ function processorFixture(caption: string, transcriptStatus: string, transcriptT
         caption, creatorUsername: 'oxtailpapi', thumbnailUrl: '', embedHtml: '', likes: 0, views: 0,
       }),
     },
+    // The real module: it is pure text handling with no provider calls, so
+    // mocking it would test the mock rather than the fallback.
+    './nameCandidates': require('../lib/pipeline/nameCandidates'),
     './transcript': {
       fetchTranscript: record('transcript', { status: transcriptStatus, text: transcriptText, source: 'supadata', lang: 'en' }),
       saveTranscript: record('saveTranscript'),

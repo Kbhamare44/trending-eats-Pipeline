@@ -84,7 +84,11 @@ export interface DrainOutcome {
  */
 export async function drainSubmission(
   submissionId: string,
-  options: { bypassGate?: boolean } = {}
+  options: {
+    bypassGate?: boolean;
+    /** A name the person supplied. In memory only — see processSubmission. */
+    hint?: { restaurantName?: string | null; city?: string | null };
+  } = {}
 ): Promise<DrainOutcome> {
   let attempts = 0;
 
@@ -119,7 +123,8 @@ export async function drainSubmission(
 
     const result: ProcessingResult = await processSubmission(
       submissionId,
-      record.tiktok_url
+      record.tiktok_url,
+      options.hint
     );
 
     if (!result.success) {

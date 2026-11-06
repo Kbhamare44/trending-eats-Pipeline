@@ -49,7 +49,18 @@ export async function POST(request: NextRequest) {
       return badRequest('A JSON body is required');
     }
 
-    const { tiktokUrl } = body as Record<string, unknown>;
+    const { tiktokUrl, restaurantName, city } = body as Record<string, unknown>;
+
+    // Supplied when we had to ask: TikTok no longer returns captions, so a
+    // video whose transcript never names the place cannot be identified from
+    // the content alone.
+    const hint = {
+      restaurantName:
+        typeof restaurantName === 'string' && restaurantName.trim()
+          ? restaurantName.trim().slice(0, 120)
+          : null,
+      city: typeof city === 'string' && city.trim() ? city.trim().slice(0, 80) : null,
+    };
 
     if (typeof tiktokUrl !== 'string' || !tiktokUrl.trim()) {
       return badRequest('tiktokUrl is required');
@@ -146,7 +157,7 @@ export async function POST(request: NextRequest) {
         // retrying" and then nothing. These failures are usually
         // nondeterministic, so trying again in seconds normally succeeds.
         for (let i = 0; i < QUEUE_CONFIG.maxAttempts; i++) {
-          const outcome = await drainSubmission(submissionId);
+          const outcome = await drainSubmission(submissionId, { hint });
           console.log('[Submit/after]', JSON.stringify(outcome));
           if (outcome.status !== 'retry') break;
           await new Promise((r) => setTimeout(r, 2000 * (i + 1)));

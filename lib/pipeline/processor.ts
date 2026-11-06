@@ -1,5 +1,6 @@
 import { fetchTikTokData } from './tiktok';
 import { fetchTranscript, saveTranscript } from './transcript';
+import { extractNameCandidates } from './nameCandidates';
 import { classifyContent } from '@/lib/gemini/classify';
 import { extractRestaurantData } from '@/lib/gemini/extract';
 import { findRestaurant } from '@/lib/google/places';
@@ -22,6 +23,15 @@ import { isGta } from '@/lib/geo/gta';
  */
 export const NEEDS_LOCATION = '[needs-location] ';
 
+/**
+ * Marks a rejection the person can fix by naming the place.
+ *
+ * Needed because TikTok stopped returning captions, so a video whose
+ * transcript never says the restaurant's name has nothing for us to extract
+ * — which is a question, not a dead end.
+ */
+export const NEEDS_NAME = '[needs-name] ';
+
 export interface ProcessingResult {
   success: boolean;
   restaurantId?: string;
@@ -31,6 +41,8 @@ export interface ProcessingResult {
   error?: string;
   /** False when the match is outside the Toronto/GTA launch market. */
   inCoverageArea?: boolean;
+  /** True when we could not identify the restaurant and must ask. */
+  needsName?: boolean;
   /** True when we need the person to name a city before we can proceed. */
   needsLocation?: boolean;
   /** Set when the restaurant was already in our database. */
@@ -39,7 +51,13 @@ export interface ProcessingResult {
 
 export async function processSubmission(
   submissionId: string,
-  tiktokUrl: string
+  tiktokUrl: string,
+  /**
+   * What the person told us when we had to ask. In memory only: there is no
+   * column for it, so a retry on a later invocation loses it and asks again.
+   * shortcut: not persisted, add raw_submissions.user_hint if retries need it.
+   */
+  hint?: { restaurantName?: string | null; city?: string | null }
 ): Promise<ProcessingResult> {
   console.log(`[Pipeline] Starting: ${submissionId}`);
 
@@ -138,11 +156,42 @@ export async function processSubmission(
       transcript.text ?? undefined
     );
 
+    // A name the person supplied outranks extraction: they watched the video.
+    if (hint?.restaurantName) {
+      extraction.restaurantName = hint.restaurantName;
+      if (hint.city) extraction.city = hint.city;
+    }
+
+    // Fallback: the model found no name. Captions are gone from TikTok's
+    // oEmbed, so this is now common, and the remaining text is a fragment or
+    // a mangled transcript. A candidate here is a SUGGESTION — it still has
+    // to clear Google Places, and an unverifiable one becomes a question
+    // rather than a stored address.
+    if (!extraction.restaurantName) {
+      const candidates = [
+        ...extractNameCandidates(tiktokData.caption ?? '', 'caption'),
+        ...extractNameCandidates(transcript.text ?? '', 'transcript'),
+      ];
+      if (candidates[0]) {
+        console.log(
+          `[Pipeline] no model name; trying candidate "${candidates[0].name}" ` +
+            `from ${candidates[0].source}: "${candidates[0].sourcePhrase}"`
+        );
+        extraction.restaurantName = candidates[0].name;
+      }
+    }
+
     if (!extraction.restaurantName) {
       await updateSubmissionStatus(submissionId, 'rejected', {
-        rejectionReason: 'Could not identify restaurant name from the retrieved caption or transcript',
+        rejectionReason:
+          NEEDS_NAME +
+          'We could not work out which restaurant this is. What is it called?',
       });
-      return { success: false, rejectionReason: 'No restaurant name found' };
+      return {
+        success: false,
+        rejectionReason: 'We could not work out which restaurant this is. What is it called?',
+        needsName: true,
+      };
     }
 
     // Reject high-confidence sponsored content
